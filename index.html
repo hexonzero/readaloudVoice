@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Read Aloud</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="top"><header><button class="circ" id="homeBtn" hidden aria-label="Home"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><h1 id="title">Read Aloud</h1><button id="chbar" hidden aria-expanded="false" aria-label="Chapters"><span id="chn"></span><span id="chname"></span></button><button class="circ" id="menuBtn" hidden aria-label="Chapter list"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg></button></header><div id="chlist" hidden></div></div>
+<main id="main">
+  <section id="home">
+    <div class="ribbons" role="tablist">
+      <button id="tab-add" role="tab">Add file</button>
+      <button id="tab-books" role="tab">Your books <span id="nb"></span></button>
+      <button id="tab-wish" role="tab">Wishlist</button>
+    </div>
+    <div id="msg" role="status" style="padding:0 16px"></div>
+    <div class="panel" id="p-add">
+      <div id="drop" tabindex="0" role="button"><b>Open a document to hear it read</b><span>Drop a PDF, EPUB, DOCX, TXT or HTML file here, or tap to choose one. Files stay on your device.</span></div>
+      <h3 class="sec">Read a web page</h3>
+      <div class="row2"><input type="url" id="url" placeholder="Paste a link (https://…)" aria-label="Web page link"><button id="urlgo" class="btn">Read</button></div>
+      <h3 class="sec">Or paste text</h3>
+      <textarea id="ptxt" rows="3" placeholder="Paste or type anything…" aria-label="Text to read"></textarea>
+      <button id="ptgo" class="btn">Read text</button>
+      <h3 class="sec">Voice</h3>
+      <div class="kst kcard"></div>
+    </div>
+    <div class="panel" id="p-books" hidden></div>
+    <div class="panel" id="p-wish" hidden>
+      <div class="wform"><input type="text" id="wt" placeholder="Title, author or link" aria-label="Title"><input type="text" id="wn" placeholder="Note (optional)" aria-label="Note"><button id="wadd">Add to wishlist</button></div>
+      <div id="wl"></div>
+    </div>
+  </section>
+  <article id="pane" hidden></article>
+</main>
+<div id="fab" hidden>
+  <svg class="ring" viewBox="0 0 64 64" aria-hidden="true"><circle class="rt" cx="32" cy="32" r="29"/><circle id="rp" cx="32" cy="32" r="29"/></svg>
+  <button class="pp" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg></button>
+  <button id="fabx" aria-label="Open player"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
+</div>
+<section id="sheet" hidden aria-label="Player">
+  <div class="grab"></div>
+  <div class="chd"><div id="cv">R</div><div class="cti"><b id="ctt"></b><div id="chap"></div></div>
+    <button class="ib" id="gear" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg></button>
+    <button class="ib" id="xp" aria-label="Close player" title="Close"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button></div>
+  <div id="nowbox"><small>Now reading</small><div id="now"></div></div>
+  <div class="scrub"><input type="range" id="seek" min="0" max="1000" value="0" aria-label="Position in chapter"><div class="tm"><span id="t1">0:00</span><span id="t2">≈ −0:00</span></div></div>
+  <div class="ctl">
+    <button class="prc" title="Previous chapter (Shift+←)" aria-label="Previous chapter"><svg viewBox="0 0 24 24"><path d="M13 5l-7 7 7 7M20 5l-7 7 7 7"/></svg></button>
+    <button id="ps" title="Previous sentence (←)" aria-label="Previous sentence"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="pp" title="Play / pause (Space)" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg></button>
+    <button id="ns" title="Next sentence (→)" aria-label="Next sentence"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+    <button class="nxc" title="Next chapter (Shift+→)" aria-label="Next chapter"><svg viewBox="0 0 24 24"><path d="M11 5l7 7-7 7M4 5l7 7-7 7"/></svg></button>
+  </div>
+  <div class="pills"><select id="rate" aria-label="Speed"></select><select id="voice" aria-label="Voice"></select></div>
+  <div class="kst" id="ksheet" hidden></div>
+  <div class="m"><span id="pct">0% read</span><span id="left"></span></div>
+  <div id="menu" hidden></div>
+</section>
+<button id="rfh" hidden>▶ Read from here</button>
+<div id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="file" accept=".pdf,.epub,.docx,.txt,.md,.html,.htm" hidden>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
