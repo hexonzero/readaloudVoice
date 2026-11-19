@@ -100,4 +100,4 @@ Documents are parsed in your browser. The only network requests are loading the 
 
 ## License
 
-Add your preferred license here (e.g. MIT).
+N/A
