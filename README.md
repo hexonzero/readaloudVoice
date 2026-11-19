@@ -42,7 +42,7 @@ No build step and no dependencies to install. Libraries (JSZip, pdf.js, kokoro-j
 AI speech is generated sentence by sentence. To avoid pauses between sentences the app:
 
 - **Pre-generates about 3 pages** of upcoming text in the background (crossing chapter boundaries).
-- Shows a **"Preparing voice…" screen** before playback starts, or if the buffer runs dry, until about 1 page is ready. From it you can choose **Start now**, **Use device voice**, or **Cancel**.
+- **Measures how fast your PC generates speech** and waits only as long as needed so playback can never catch up with generation. On a fast machine that is 1–2 sentences; on a slower one the "Preparing voice…" screen fills to 100% of what is required, then starts. There is no timeout. You can still choose **Start now**, **Use device voice** or **Cancel**.
 - **Preloads the next sentence** into a second audio element so one sentence flows straight into the next.
 - Keeps generating while paused, so resuming is instant.
 - Drops stale queued work when you jump somewhere else, so the engine always works on what you will hear next.
@@ -50,14 +50,14 @@ AI speech is generated sentence by sentence. To avoid pauses between sentences t
 Tune it at the top of the Kokoro section in `app.js`:
 
 ```js
-const PAGE_CH=1800, START_PAGES=1, AHEAD_PAGES=3, KMAX=600;
+const PAGE_CH=1800, AHEAD_PAGES=3, KMAX=600, MARGIN=1.2;
 //  PAGE_CH      characters counted as one "page"
-//  START_PAGES  pages to buffer before (re)starting playback
-//  AHEAD_PAGES  pages to keep generated ahead while playing
+//  AHEAD_PAGES  pages to keep generated ahead while playing (also the window the wait is sized from)
 //  KMAX         max cached sentences (older ones are freed)
+//  MARGIN       safety factor: higher = waits longer but stalls less
 ```
 
-Rough memory use: about 5 MB per page of audio, so the default 3-page buffer is only ~15 MB. If you have a slower machine, raise `START_PAGES`; if you want a longer runway, raise `AHEAD_PAGES`.
+Rough memory use: about 5 MB per page of audio, so the default 3-page buffer is only ~15 MB. For a bigger safety cushion raise `MARGIN` (e.g. 1.5) or `AHEAD_PAGES`.
 
 ## Controls
 
@@ -86,7 +86,7 @@ How the voice engine works: `kokoroCore` runs in a Blob **web worker** (so the p
 | "Opened as a file" error | Serve over `http://localhost` or GitHub Pages (see *Run it*) |
 | Voice download fails | Check your connection; the model comes from jsDelivr and Hugging Face. Tap **Retry** |
 | Preview inside Claude says network blocked | Use your hosted copy; sandboxed previews block the CDN |
-| Still pauses on a slow machine | Increase `START_PAGES`, or choose a device voice |
+| Still pauses | Raise `MARGIN` in `app.js` (e.g. 1.5), or lower the playback speed. Speeds above 1x consume audio faster than it is generated |
 | Page looks stale after an update | Hard refresh (`Ctrl+Shift+R`) to bypass the cache |
 | No sound on mobile | Tap play once; browsers require a user gesture before audio |
 
@@ -100,4 +100,4 @@ Documents are parsed in your browser. The only network requests are loading the 
 
 ## License
 
-N/A
+Add your preferred license here (e.g. MIT).

@@ -250,9 +250,10 @@ if('mediaSession'in navigator){
 /* ---------- voices: Kokoro AI (Heart) + this device ---------- */
 const KV=[['af_heart','Heart ❤ — Kokoro AI'],['af_bella','Bella — Kokoro AI'],['af_nicole','Nicole — Kokoro AI'],['af_sarah','Sarah — Kokoro AI'],['af_nova','Nova — Kokoro AI'],['af_sky','Sky — Kokoro AI'],['am_adam','Adam — Kokoro AI'],['am_michael','Michael — Kokoro AI'],['am_fenrir','Fenrir — Kokoro AI'],['bf_emma','Emma (UK) — Kokoro AI'],['bf_isabella','Isabella (UK) — Kokoro AI'],['bm_george','George (UK) — Kokoro AI'],['bm_lewis','Lewis (UK) — Kokoro AI']];
 let kMode='',dev=[],kv='af_heart',kw=null,kReady=false,kBusy=false,kPct=0,kErr='',kid=0,part=null;
-/* Smooth-playback buffer. A "page" is ~1800 characters of text. */
-const PAGE_CH=1800, START_PAGES=1, AHEAD_PAGES=3, KMAX=600;
-const BUF_START=PAGE_CH*START_PAGES, BUF_AHEAD=PAGE_CH*AHEAD_PAGES;
+/* Smooth-playback buffer. A "page" is ~1800 characters of text. kspd = measured generation speed (x realtime). */
+const PAGE_CH=1800, AHEAD_PAGES=3, KMAX=600, MARGIN=1.2;
+const BUF_AHEAD=PAGE_CH*AHEAD_PAGES;
+let kspd=0;const kfail=new Map();
 const kpend=new Map(),kcache=new Map(),kdone=new Set(),kst=new Set(),au=new Audio();au.preservesPitch=true;
 const AU=[au,new Audio()];AU[1].preservesPitch=true;let ai=0,natural=false,waitSkip=false;
 const pauseAU=()=>AU.forEach(a=>a.pause());
@@ -291,7 +292,7 @@ function kokoroCore(KokoroTTS,post){
     if(busy||!tts)return;busy=true;
     while(q.length){
       const m=q.shift();post({type:'start',id:m.id});
-      try{const a=await tts.generate(m.text,{voice:m.voice});post({type:'audio',id:m.id,blob:wav(a.audio,a.sampling_rate)})}
+      try{const t0=performance.now();const a=await tts.generate(m.text,{voice:m.voice});post({type:'audio',id:m.id,blob:wav(a.audio,a.sampling_rate),dur:a.audio.length/a.sampling_rate,ms:performance.now()-t0})}
       catch(e){post({type:'fail',id:m.id,msg:String(e)})}
       await new Promise(r=>setTimeout(r,40));
     }
@@ -309,7 +310,7 @@ function kMsg(e){
   else if(m.type==='ready'){kReady=true;kBusy=false;store.set('kdl',1);kStatus();toast('Heart voice ready ❤');if(playing&&selK())speak()}
   else if(m.type==='error')kFail(m.msg)
   else if(m.type==='start')kst.add(m.id);
-  else if(m.type==='audio'){kst.delete(m.id);if(r){kpend.delete(m.id);r(URL.createObjectURL(m.blob))}}
+  else if(m.type==='audio'){kst.delete(m.id);if(m.dur&&m.ms){const x=m.dur/(m.ms/1000);kspd=kspd?kspd*.7+x*.3:x}if(r){kpend.delete(m.id);r(URL.createObjectURL(m.blob))}}
   else if(m.type==='fail'){kst.delete(m.id);if(r){kpend.delete(m.id);r(null)}}
 }
 async function kMain(why){
@@ -337,7 +338,7 @@ function kgen(text,pri){
     const id=++kid;
     e={id,p:new Promise(res=>{kpend.set(id,res);kw.postMessage({type:'gen',id,text,voice:kv,pri})})};
     kcache.set(k,e);
-    e.p.then(u=>{if(u)kdone.add(k);else if(kcache.get(k)===e)kcache.delete(k)});
+    e.p.then(u=>{if(u){kdone.add(k);kfail.delete(k)}else{if(!e.dropped)kfail.set(k,(kfail.get(k)||0)+1);if(kcache.get(k)===e)kcache.delete(k)}});
     while(kcache.size>KMAX){const f=kcache.keys().next().value,o=kcache.get(f);kcache.delete(f);kdone.delete(f);o.p.then(u=>u&&URL.revokeObjectURL(u))}
   }else if(pri&&!kdone.has(k))kw.postMessage({type:'bump',id:e.id});
   return e.p;
@@ -346,7 +347,7 @@ function kgen(text,pri){
 function kdrop(){
   const ids=[];
   for(const [k,e] of kcache){
-    if(kpend.has(e.id)&&!kst.has(e.id)){ids.push(e.id);const r=kpend.get(e.id);kpend.delete(e.id);kcache.delete(k);r(null)}
+    if(kpend.has(e.id)&&!kst.has(e.id)){ids.push(e.id);const r=kpend.get(e.id);e.dropped=true;kpend.delete(e.id);kcache.delete(k);r(null)}
   }
   if(ids.length&&kw)kw.postMessage({type:'drop',ids});
 }
@@ -362,19 +363,34 @@ function lookahead(maxCh){
 }
 const prefetch=()=>lookahead(BUF_AHEAD).forEach(x=>kgen(x));
 function showWait(){$('#wait').hidden=false;$('#wdev').hidden=!dev.length}
-function setWait(f){const p=Math.round(Math.min(1,f)*100);$('#wait i').style.width=p+'%';$('#waitt').textContent=p+'% of the next page is ready'}
+function setWait(f,eta){
+  const p=Math.round(Math.min(1,f)*100);$('#wait i').style.width=p+'%';
+  $('#waitt').textContent=p+'% ready'+(eta>1?' · about '+Math.ceil(eta)+'s left':'');
+}
 function hideWait(){$('#wait').hidden=true}
-/* waiting screen: hold playback until ~1 page is generated (or the user says start now) */
+/* How much must be ready before playing so the buffer can never run dry?
+   Audio is consumed at `rate`x and produced at kspd x. If production is faster, only 1-2 sentences are needed;
+   if slower, we need the shortfall (1 - kspd/rate) of the lookahead window ready up front. */
+function extraNeeded(){
+  const g=kspd||.7;
+  return Math.round(BUF_AHEAD*Math.max(0,1-g/(rate*MARGIN)));
+}
+const okK=x=>kdone.has(kv+'|'+x)||(kfail.get(kv+'|'+x)||0)>=2;
 async function kWait(t,txt){
-  const L=[txt,...lookahead(BUF_START)],need=L.reduce((a,x)=>a+x.length,0);
-  const have=()=>{let n=0;for(const x of L){if(!kdone.has(kv+'|'+x))break;n+=x.length}return n};
-  if(have()>=need)return true;
-  waitSkip=false;showWait();const t0=Date.now();
-  while(t===token&&playing&&!waitSkip&&Date.now()-t0<45000){
-    const h=have();setWait(h/need);if(h>=need)break;
-    L.forEach(x=>kgen(x));await sleep(120);
+  const mk=()=>{const L=[txt,...lookahead(extraNeeded())];return{L,need:L.reduce((a,x)=>a+x.length,0)}};
+  const have=L=>{let n=0;for(const x of L){if(!okK(x))break;n+=x.length}return n};
+  let {L,need}=mk();
+  if(have(L)>=need)return true;
+  waitSkip=false;showWait();let shown=0;
+  while(t===token&&playing&&!waitSkip){
+    ({L,need}=mk());const h=have(L);
+    if(h>=need)break;
+    shown=Math.max(shown,h/need);
+    setWait(shown,(need-h)/15/(kspd||.7));
+    L.forEach(x=>{if((kfail.get(kv+'|'+x)||0)<2)kgen(x)});
+    await sleep(120);
   }
-  hideWait();return t===token&&playing;
+  setWait(1);hideWait();return t===token&&playing;
 }
 async function speakK(t,txt){
   const fab=$('#fab');fab.classList.add('busy');
