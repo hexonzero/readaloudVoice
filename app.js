@@ -178,22 +178,34 @@ const nextC=()=>ci+1<ch.length&&go(ci+1,0);
 const prevC=()=>si>2||ci===0?go(ci,0):go(ci-1,0);
 
 /* ---------- speech ---------- */
+/* Browser voices can't be pre-rendered, but the engine accepts a queue. Keeping the next few
+   sentences queued lets it fetch/prepare them while the current one is still talking, so there is no gap. */
+const AHEAD=3;let nq=null,part=null;
+const posAfter=(c,s)=>{s++;if(s>=ch[c].S.length){c++;s=0}return c<ch.length?{c,s}:null};
 function speak(){
-  const t=++token;synth.cancel();pauseAU();
+  const t=++token;synth.cancel();
   if(!playing)return;
-  const wasNat=natural;natural=false;
-  if(!wasNat&&selK()&&kReady)kdrop();
   let txt=ch[ci].S[si].t;
   if(part&&part.c===ci&&part.s===si)txt=txt.slice(part.o)||txt;
-  part=null;
-  if(selK()&&kReady)speakK(t,txt);else speakDev(t,txt);
+  part=null;nq=posAfter(ci,si);
+  queueU(t,ci,si,txt);
+  for(let n=0;n<AHEAD;n++)topUp(t);
 }
-function speakDev(t,txt){
-  const u=new SpeechSynthesisUtterance(txt),dv=selK()?(dev.find(x=>x.default)||dev[0]):voice;
-  if(dv){u.voice=dv;u.lang=dv.lang}
+function topUp(t){
+  if(t!==token||!nq)return;
+  const p=nq;nq=posAfter(p.c,p.s);queueU(t,p.c,p.s,ch[p.c].S[p.s].t);
+}
+function queueU(t,c,s,txt){
+  const u=new SpeechSynthesisUtterance(txt),last=!posAfter(c,s);
+  if(voice){u.voice=voice;u.lang=voice.lang}
   u.rate=rate;u.volume=muted?0:1;
-  u.onend=()=>{if(t===token&&playing)nextS()};
-  u.onerror=e=>{if(t===token&&playing&&e.error!=='canceled'&&e.error!=='interrupted')setTimeout(()=>{if(t===token&&playing)nextS()},200)};
+  u.onstart=()=>{
+    if(t!==token||!playing)return;
+    if(c!==ci||s!==si){const changed=c!==ci;ci=c;si=s;if(changed){renderChapter();toast('Chapter '+(ci+1)+' · '+ch[ci].title)}mark()}
+    topUp(t);
+  };
+  u.onend=()=>{if(t===token&&playing&&last)finish()};
+  u.onerror=e=>{if(t===token&&playing&&last&&e.error!=='canceled'&&e.error!=='interrupted')finish()};
   synth.speak(u);
 }
 const keep=new Audio();keep.loop=true;
@@ -207,7 +219,7 @@ function setPlaying(p){
   if('mediaSession'in navigator)navigator.mediaSession.playbackState=p?'playing':'paused';
 }
 function toggle(){if(!ch.length)return;setPlaying(!playing);speak()}
-function stop(){setPlaying(false);token++;synth.cancel();pauseAU();hideWait()}
+function stop(){setPlaying(false);token++;synth.cancel()}
 function finish(){stop();setMsg('')}
 
 /* ---------- controls ---------- */
@@ -215,8 +227,8 @@ document.querySelectorAll('.pp').forEach(b=>b.onclick=toggle);
 document.querySelectorAll('.prc').forEach(b=>b.onclick=prevC);
 document.querySelectorAll('.nxc').forEach(b=>b.onclick=nextC);
 $('#ns').onclick=nextS;$('#ps').onclick=prevS;
-$('#rate').oninput=e=>{rate=+e.target.value;store.set('rate',rate);AU.forEach(a=>a.playbackRate=rate);if(ch.length)mark()};
-$('#rate').onchange=()=>{if(playing&&!(selK()&&kReady))speak()};
+$('#rate').oninput=e=>{rate=+e.target.value;store.set('rate',rate);if(ch.length)mark()};
+$('#rate').onchange=()=>{if(playing)speak()};
 function chList(open){
   const l=$('#chlist');l.hidden=!open;$('#chbar').setAttribute('aria-expanded',open);
   if(open){const c=l.querySelector('.cur');if(c)l.scrollTop=c.offsetTop-80}
@@ -239,194 +251,35 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='ArrowRight'){e.preventDefault();e.shiftKey?nextC():nextS()}
   else if(e.key==='ArrowLeft'){e.preventDefault();e.shiftKey?prevC():prevS()}
 });
-document.addEventListener('visibilitychange',()=>{if(playing&&!synth.speaking&&AU.every(a=>a.paused)&&!$('#fab').classList.contains('busy')&&$('#wait').hidden)speak()});
+document.addEventListener('visibilitychange',()=>{if(playing&&!synth.speaking)speak()});
 if('mediaSession'in navigator){
   const h=(a,f)=>{try{navigator.mediaSession.setActionHandler(a,f)}catch(e){}};
   h('play',()=>{if(!playing)toggle()});h('pause',()=>{if(playing)toggle()});
   h('nexttrack',nextC);h('previoustrack',prevC);h('seekforward',nextS);h('seekbackward',prevS);
 }
 
-/* ---------- voices ---------- */
-/* ---------- voices: Kokoro AI (Heart) + this device ---------- */
-const KV=[['af_heart','Heart ❤ — Kokoro AI'],['af_bella','Bella — Kokoro AI'],['af_nicole','Nicole — Kokoro AI'],['af_sarah','Sarah — Kokoro AI'],['af_nova','Nova — Kokoro AI'],['af_sky','Sky — Kokoro AI'],['am_adam','Adam — Kokoro AI'],['am_michael','Michael — Kokoro AI'],['am_fenrir','Fenrir — Kokoro AI'],['bf_emma','Emma (UK) — Kokoro AI'],['bf_isabella','Isabella (UK) — Kokoro AI'],['bm_george','George (UK) — Kokoro AI'],['bm_lewis','Lewis (UK) — Kokoro AI']];
-let kMode='',dev=[],kv='af_heart',kw=null,kReady=false,kBusy=false,kPct=0,kErr='',kid=0,part=null;
-/* Smooth-playback buffer. A "page" is ~1800 characters of text. kspd = measured generation speed (x realtime). */
-const PAGE_CH=1800, AHEAD_PAGES=3, KMAX=600, MARGIN=1.2;
-const BUF_AHEAD=PAGE_CH*AHEAD_PAGES;
-let kspd=0;const kfail=new Map();
-const kpend=new Map(),kcache=new Map(),kdone=new Set(),kst=new Set(),au=new Audio();au.preservesPitch=true;
-const AU=[au,new Audio()];AU[1].preservesPitch=true;let ai=0,natural=false,waitSkip=false;
-const pauseAU=()=>AU.forEach(a=>a.pause());
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const selK=()=>$('#voice').value.startsWith('k:');
-function kStatus(){
-  let h;
-  if(kReady)h='<b>Heart is ready</b> · runs on your device and works offline'+(kMode==='main'?'<br><span class="bad">Compatibility mode: the screen can freeze while it speaks. Pick a device voice if it’s too slow.</span>':'');
-  else if(kBusy){const p=Math.round(kPct*100);h='Downloading voice… '+p+'%<div class="meter"><i style="width:'+p+'%"></i></div>'}
-  else if(kErr)h='<span class="bad">'+esc(kErr)+'</span> <button data-k class="btn">Retry</button><button data-km class="btn">Compatibility mode (may freeze)</button>';
-  else h='Kokoro AI voices sound far more natural. One-time download of about 90 MB, then it works offline. <button data-k class="btn">Download Heart</button>';
-  document.querySelectorAll('.kst').forEach(e=>e.innerHTML=h);
-  $('#ksheet').hidden=!selK()||kReady;
-}
-const KCDN='https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm';
-/* Engine core: runs inside a Blob web worker, or on the main thread as a fallback. Must stay self-contained. */
-function kokoroCore(KokoroTTS,post){
-  let tts=null,q=[],busy=false;const files={};
-  const wav=(f,sr)=>{
-    const n=f.length,b=new DataView(new ArrayBuffer(44+n*2));
-    const s=(o,t)=>[...t].forEach((c,i)=>b.setUint8(o+i,c.charCodeAt(0)));
-    s(0,'RIFF');b.setUint32(4,36+n*2,true);s(8,'WAVEfmt ');b.setUint32(16,16,true);b.setUint16(20,1,true);b.setUint16(22,1,true);
-    b.setUint32(24,sr,true);b.setUint32(28,sr*2,true);b.setUint16(32,2,true);b.setUint16(34,16,true);s(36,'data');b.setUint32(40,n*2,true);
-    for(let i=0;i<n;i++)b.setInt16(44+i*2,Math.max(-1,Math.min(1,f[i]))*32767,true);
-    return new Blob([b],{type:'audio/wav'});
-  };
-  async function load(){
-    try{
-      tts=await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX',{dtype:'q8',device:'wasm',progress_callback:p=>{
-        if(p.status==='progress'&&p.total){files[p.file]=[p.loaded,p.total];let l=0,t=0;for(const k in files){l+=files[k][0];t+=files[k][1]}post({type:'progress',pct:l/t})}
-      }});
-      post({type:'ready'});run();
-    }catch(e){post({type:'error',msg:String((e&&e.message)||e)})}
-  }
-  async function run(){
-    if(busy||!tts)return;busy=true;
-    while(q.length){
-      const m=q.shift();post({type:'start',id:m.id});
-      try{const t0=performance.now();const a=await tts.generate(m.text,{voice:m.voice});post({type:'audio',id:m.id,blob:wav(a.audio,a.sampling_rate),dur:a.audio.length/a.sampling_rate,ms:performance.now()-t0})}
-      catch(e){post({type:'fail',id:m.id,msg:String(e)})}
-      await new Promise(r=>setTimeout(r,40));
-    }
-    busy=false;
-  }
-  return m=>{if(m.type==='load')load();else if(m.type==='gen'){m.pri?q.unshift(m):q.push(m);run()}else if(m.type==='bump'){const i=q.findIndex(x=>x.id===m.id);if(i>0)q.unshift(q.splice(i,1)[0])}else if(m.type==='drop'){const d=new Set(m.ids);q=q.filter(x=>!d.has(x.id))}};
-}
-function kFail(m){
-  kBusy=false;kErr=m+(/claude/.test(location.hostname)?' (Claude’s preview blocks the network. Use your hosted copy.)':'');
-  if(kw&&kw.terminate)kw.terminate();kw=null;kStatus();
-}
-function kMsg(e){
-  const m=e.data,r=kpend.get(m.id);
-  if(m.type==='progress'){kPct=m.pct;kStatus()}
-  else if(m.type==='ready'){kReady=true;kBusy=false;store.set('kdl',1);kStatus();toast('Heart voice ready ❤');if(playing&&selK())speak()}
-  else if(m.type==='error')kFail(m.msg)
-  else if(m.type==='start')kst.add(m.id);
-  else if(m.type==='audio'){kst.delete(m.id);if(m.dur&&m.ms){const x=m.dur/(m.ms/1000);kspd=kspd?kspd*.7+x*.3:x}if(r){kpend.delete(m.id);r(URL.createObjectURL(m.blob))}}
-  else if(m.type==='fail'){kst.delete(m.id);if(r){kpend.delete(m.id);r(null)}}
-}
-async function kMain(why){
-  if(kw||kReady)return;kErr='';kBusy=true;kMode='main';kStatus();
-  try{
-    const {KokoroTTS}=await import(KCDN);
-    const on=kokoroCore(KokoroTTS,m=>kMsg({data:m}));
-    kw={postMessage:on,terminate(){}};kw.postMessage({type:'load'});
-  }catch(e){kFail('Couldn’t start the voice engine: '+String((e&&e.message)||e)+' ['+why+']')}
-}
-function kLoad(){
-  if(kw||kReady||kBusy)return;
-  if(!/^https?:$/.test(location.protocol)){kFail('This page was opened as a file ('+location.protocol+'//). Browsers block the voice engine there. Open it from GitHub Pages or http://localhost instead.');return}kErr='';kBusy=true;kPct=0;kStatus();
-  try{
-    const src='import {KokoroTTS} from "'+KCDN+'";const on=('+kokoroCore+')(KokoroTTS,m=>postMessage(m));onmessage=e=>on(e.data);';
-    const w=new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})),{type:'module'});
-    w.onmessage=kMsg;
-    w.onerror=ev=>{if(kReady)return;kFail('The background engine failed to start'+(ev&&ev.message?': '+ev.message:'')+'.')};
-    kw=w;kMode='worker';w.postMessage({type:'load'});
-  }catch(e){kFail('Couldn’t start a background worker: '+String((e&&e.message)||e))}
-}
-function kgen(text,pri){
-  const k=kv+'|'+text;let e=kcache.get(k);
-  if(!e){
-    const id=++kid;
-    e={id,p:new Promise(res=>{kpend.set(id,res);kw.postMessage({type:'gen',id,text,voice:kv,pri})})};
-    kcache.set(k,e);
-    e.p.then(u=>{if(u){kdone.add(k);kfail.delete(k)}else{if(!e.dropped)kfail.set(k,(kfail.get(k)||0)+1);if(kcache.get(k)===e)kcache.delete(k)}});
-    while(kcache.size>KMAX){const f=kcache.keys().next().value,o=kcache.get(f);kcache.delete(f);kdone.delete(f);o.p.then(u=>u&&URL.revokeObjectURL(u))}
-  }else if(pri&&!kdone.has(k))kw.postMessage({type:'bump',id:e.id});
-  return e.p;
-}
-/* forget queued-but-not-started sentences (after a jump / voice change) so the engine works on what matters now */
-function kdrop(){
-  const ids=[];
-  for(const [k,e] of kcache){
-    if(kpend.has(e.id)&&!kst.has(e.id)){ids.push(e.id);const r=kpend.get(e.id);e.dropped=true;kpend.delete(e.id);kcache.delete(k);r(null)}
-  }
-  if(ids.length&&kw)kw.postMessage({type:'drop',ids});
-}
-/* sentences after the current one, up to ~maxCh characters, crossing chapters */
-function lookahead(maxCh){
-  const o=[];let c=ci,s=si+1,n=0;
-  while(n<maxCh){
-    if(s>=ch[c].S.length){c++;s=0}
-    if(c>=ch.length)break;
-    const t=ch[c].S[s].t;o.push(t);n+=t.length;s++;
-  }
-  return o;
-}
-const prefetch=()=>lookahead(BUF_AHEAD).forEach(x=>kgen(x));
-function showWait(){$('#wait').hidden=false;$('#wdev').hidden=!dev.length}
-function setWait(f,eta){
-  const p=Math.round(Math.min(1,f)*100);$('#wait i').style.width=p+'%';
-  $('#waitt').textContent=p+'% ready'+(eta>1?' · about '+Math.ceil(eta)+'s left':'');
-}
-function hideWait(){$('#wait').hidden=true}
-/* How much must be ready before playing so the buffer can never run dry?
-   Audio is consumed at `rate`x and produced at kspd x. If production is faster, only 1-2 sentences are needed;
-   if slower, we need the shortfall (1 - kspd/rate) of the lookahead window ready up front. */
-function extraNeeded(){
-  const g=kspd||.7;
-  return Math.round(BUF_AHEAD*Math.max(0,1-g/(rate*MARGIN)));
-}
-const okK=x=>kdone.has(kv+'|'+x)||(kfail.get(kv+'|'+x)||0)>=2;
-async function kWait(t,txt){
-  const mk=()=>{const L=[txt,...lookahead(extraNeeded())];return{L,need:L.reduce((a,x)=>a+x.length,0)}};
-  const have=L=>{let n=0;for(const x of L){if(!okK(x))break;n+=x.length}return n};
-  let {L,need}=mk();
-  if(have(L)>=need)return true;
-  waitSkip=false;showWait();let shown=0;
-  while(t===token&&playing&&!waitSkip){
-    ({L,need}=mk());const h=have(L);
-    if(h>=need)break;
-    shown=Math.max(shown,h/need);
-    setWait(shown,(need-h)/15/(kspd||.7));
-    L.forEach(x=>{if((kfail.get(kv+'|'+x)||0)<2)kgen(x)});
-    await sleep(120);
-  }
-  setWait(1);hideWait();return t===token&&playing;
-}
-async function speakK(t,txt){
-  const fab=$('#fab');fab.classList.add('busy');
-  const p=kgen(txt,true);
-  if(kMode!=='main'){prefetch();if(!(await kWait(t,txt))){fab.classList.remove('busy');return}}
-  const url=await p;fab.classList.remove('busy');
-  if(t!==token||!playing)return;
-  if(!url){speakDev(t,txt);return}
-  /* gapless: the next sentence is already loaded in the other audio element */
-  let a=AU[1-ai];
-  if(a.dataset.u===url)ai=1-ai;else{a=AU[ai];a.src=url;a.dataset.u=url}
-  AU[1-ai].pause();
-  const nx=()=>{if(t===token&&playing){natural=true;nextS()}};
-  AU.forEach(x=>{x.onended=null;x.onerror=null});
-  a.onended=nx;a.onerror=nx;a.playbackRate=rate;a.volume=muted?0:1;
-  try{await a.play()}catch(e){}
-  const n=lookahead(1)[0];
-  if(n)kgen(n).then(u=>{if(u&&t===token){const o=AU[1-ai];if(o.dataset.u!==u){o.dataset.u=u;o.src=u;o.preload='auto';o.load()}}});
-}
+/* ---------- voices (this browser / device) ---------- */
+let dev=[];
+const isNat=v=>!v.localService||/natural|neural|online|google/i.test(v.name);
+const isUS=v=>/^en[-_]US$/i.test(v.lang);
 function pickVoice(v,save){
-  if(![...$('#voice').options].some(x=>x.value===v))v='k:af_heart';
-  $('#voice').value=v;if(save)store.set('voice2',v);
-  if(v.startsWith('k:'))kv=v.slice(2);else voice=dev.find(x=>x.voiceURI===v)||null;
-  kStatus();
+  if(![...$('#voice').options].some(x=>x.value===v))v=($('#voice').options[0]||{}).value||'';
+  $('#voice').value=v;if(save)store.set('voice3',v);
+  voice=dev.find(x=>x.voiceURI===v)||null;
 }
 function loadVoices(){
   dev=synth?synth.getVoices():[];
   const lang=(navigator.language||'en').slice(0,2);
-  dev.sort((a,b)=>(b.lang.startsWith(lang)-a.lang.startsWith(lang))||a.name.localeCompare(b.name));
-  $('#voice').innerHTML='<optgroup label="Kokoro AI · on-device">'+KV.map(k=>'<option value="k:'+k[0]+'">'+k[1]+'</option>').join('')+'</optgroup>'+(dev.length?'<optgroup label="This device">'+dev.map(x=>'<option value="'+esc(x.voiceURI)+'">'+esc(x.name)+' ('+x.lang+')</option>').join('')+'</optgroup>':'');
-  pickVoice(store.get('voice2')||'k:af_heart',false);
+  const sc=v=>isUS(v)?4:v.lang.toLowerCase().startsWith(lang)?2:0;
+  dev.sort((a,b)=>(isNat(b)-isNat(a))||(sc(b)-sc(a))||a.name.localeCompare(b.name));
+  const opt=v=>'<option value="'+esc(v.voiceURI)+'">'+esc(v.name)+' ('+v.lang+')</option>';
+  const nat=dev.filter(isNat),oth=dev.filter(v=>!isNat(v));
+  $('#voice').innerHTML=(nat.length?'<optgroup label="Natural / online voices">'+nat.map(opt).join('')+'</optgroup>':'')+(oth.length?'<optgroup label="Other voices on this device">'+oth.map(opt).join('')+'</optgroup>':'')||'<option value="">No voices found</option>';
+  const def=dev.find(v=>isNat(v)&&isUS(v))||dev.find(isUS)||dev[0];
+  pickVoice(store.get('voice3')||(def&&def.voiceURI)||'',false);
 }
-$('#voice').onchange=e=>{pickVoice(e.target.value,true);if(selK())kLoad();if(playing)speak()};
-document.addEventListener('click',e=>{if(e.target.closest('[data-k]'))kLoad();else if(e.target.closest('[data-km]'))kMain('manual')});
+$('#voice').onchange=e=>{pickVoice(e.target.value,true);if(playing)speak()};
 loadVoices();if(synth)synth.onvoiceschanged=loadVoices;
-if(store.get('kdl'))kLoad();
 $('#rate').innerHTML=[0.6,0.8,1,1.2,1.4,1.6,1.8,2,2.5,3].map(v=>'<option value="'+v+'">'+v.toFixed(1)+'×</option>').join('');$('#rate').value='1';
 const sr=store.get('rate');if(sr&&[...$('#rate').options].some(o=>+o.value===sr)){rate=sr;$('#rate').value=String(sr)}
 
@@ -648,8 +501,3 @@ rfh.onclick=()=>{
 };
 $('#main').addEventListener('scroll',()=>{rfh.hidden=true},{passive:true});
 showTab(lib.length?'books':'add');
-
-/* buffering screen buttons */
-$('#wgo').onclick=()=>{waitSkip=true};
-$('#wdev').onclick=()=>{const d=dev.find(x=>x.default)||dev[0];if(d){waitSkip=true;pickVoice(d.voiceURI,true);hideWait();speak()}};
-$('#wcancel').onclick=()=>{stop()};

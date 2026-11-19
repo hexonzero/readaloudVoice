@@ -24,8 +24,6 @@
       <h3 class="sec">Or paste text</h3>
       <textarea id="ptxt" rows="3" placeholder="Paste or type anything…" aria-label="Text to read"></textarea>
       <button id="ptgo" class="btn">Read text</button>
-      <h3 class="sec">Voice</h3>
-      <div class="kst kcard"></div>
     </div>
     <div class="panel" id="p-books" hidden></div>
     <div class="panel" id="p-wish" hidden>
@@ -55,12 +53,10 @@
     <button class="nxc" title="Next chapter (Shift+→)" aria-label="Next chapter"><svg viewBox="0 0 24 24"><path d="M11 5l7 7-7 7M4 5l7 7-7 7"/></svg></button>
   </div>
   <div class="pills"><select id="rate" aria-label="Speed"></select><select id="voice" aria-label="Voice"></select></div>
-  <div class="kst" id="ksheet" hidden></div>
   <div class="m"><span id="pct">0% read</span><span id="left"></span></div>
   <div id="menu" hidden></div>
 </section>
 <button id="rfh" hidden>▶ Read from here</button>
-<div id="wait" role="alertdialog" aria-live="polite" aria-label="Preparing voice" hidden><div class="wcard"><b>Preparing voice…</b><div class="meter"><i></i></div><small id="waitt">0% of the next page is ready</small><p>Getting far enough ahead that playback never stalls. It starts the moment it’s safe.</p><div class="wbtns"><button class="btn" id="wgo">Start now</button><button class="btn alt" id="wdev">Use device voice</button><button class="btn alt" id="wcancel">Cancel</button></div></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="file" accept=".pdf,.epub,.docx,.txt,.md,.html,.htm" hidden>
 

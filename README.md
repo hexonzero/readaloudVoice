@@ -1,63 +1,49 @@
 # Read Aloud
 
-A private, installable-feeling web reader that **reads documents to you out loud**. Open a PDF, EPUB, DOCX, TXT, Markdown or HTML file, paste a web link, or paste text, and listen with natural AI voices that run **entirely on your device**. No account, no server, and your files never leave your computer.
+A private web reader that **reads documents to you out loud**. Open a PDF, EPUB, DOCX, TXT, Markdown or HTML file, paste a web link, or paste text, and listen using the natural voices built into your browser. No account, no server, and your files never leave your device.
 
 ## Features
 
 - **Many sources**: PDF, EPUB, DOCX, TXT, MD, HTML, web page links, or pasted text
-- **Natural voices**: [Kokoro](https://github.com/hexgrad/kokoro) AI voices (Heart, Bella, Nicole, Adam, Emma, George and more) running locally in your browser, plus any voice your OS provides
-- **Smooth playback**: audio is generated up to ~3 pages ahead, with a buffering screen and gapless sentence-to-sentence playback
+- **Natural browser voices**: uses the voices already on your device, with natural / online ones (for example Google US English, or Microsoft "Natural" voices in Edge) listed first
+- **Gap-free reading**: the next few sentences are queued in the speech engine while the current one plays
 - **Follow along**: the current sentence is highlighted and scrolled into view; tap any sentence to jump there
 - **Library**: books are remembered with progress (chapter, sentence, % read), plus a wishlist
 - **Player**: speed control, previous/next sentence and chapter, seek bar, time-left estimate, lock-screen / media-key controls
-- **Themes**: light, dark and sepia, with a "read from here" selection shortcut
-- **Offline**: after the one-time voice download (~90 MB) everything works without internet
+- **Themes**: light, dark and sepia, with a "Read from here" selection shortcut
 
 ## Run it
 
-The voice engine needs `http(s)`, so opening `index.html` by double-click (`file://`) will **not** work.
+Open `index.html` through any static host, for example GitHub Pages, or locally:
 
-**Locally**
 ```bash
-# any static server works
 python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-**GitHub Pages**
-1. Push `index.html`, `app.js` and `styles.css` to a repo.
-2. Settings → Pages → deploy from your main branch.
-3. Open the published URL.
+No build step and nothing to install. JSZip and pdf.js load from a CDN.
 
-No build step and no dependencies to install. Libraries (JSZip, pdf.js, kokoro-js) load from CDNs.
+## Voices
 
-## Using the Kokoro voice
+Pick a voice from the **Voice** dropdown in the player. The list comes from your browser, so it differs by device:
 
-1. Open the **Voice** dropdown (player sheet) and pick a *Kokoro AI* voice, or tap **Download Heart** on the Add file tab.
-2. Wait for the one-time ~90 MB download (cached by the browser afterwards).
-3. Press play.
+| Browser / device | Best voices you will see |
+|---|---|
+| Chrome (desktop, Android) | Google US English and other Google voices |
+| Edge | Microsoft Aria, Jenny, Guy and other "Online (Natural)" voices |
+| Safari (iPhone, Mac) | Siri and Enhanced / Premium voices, if downloaded in system settings |
 
-### Smooth reading (buffering)
+Natural / online voices are listed first, and the default is the first US English one found.
 
-AI speech is generated sentence by sentence. To avoid pauses between sentences the app:
+### How the gaps are avoided
 
-- **Pre-generates about 3 pages** of upcoming text in the background (crossing chapter boundaries).
-- **Measures how fast your PC generates speech** and waits only as long as needed so playback can never catch up with generation. On a fast machine that is 1–2 sentences; on a slower one the "Preparing voice…" screen fills to 100% of what is required, then starts. There is no timeout. You can still choose **Start now**, **Use device voice** or **Cancel**.
-- **Preloads the next sentence** into a second audio element so one sentence flows straight into the next.
-- Keeps generating while paused, so resuming is instant.
-- Drops stale queued work when you jump somewhere else, so the engine always works on what you will hear next.
-
-Tune it at the top of the Kokoro section in `app.js`:
+Browser voices cannot be pre-generated ahead of time, so the app queues the next 3 sentences with the speech engine while the current one is speaking. The engine can prepare them in advance, so one sentence runs straight into the next. Tune it in `app.js`:
 
 ```js
-const PAGE_CH=1800, AHEAD_PAGES=3, KMAX=600, MARGIN=1.2;
-//  PAGE_CH      characters counted as one "page"
-//  AHEAD_PAGES  pages to keep generated ahead while playing (also the window the wait is sized from)
-//  KMAX         max cached sentences (older ones are freed)
-//  MARGIN       safety factor: higher = waits longer but stalls less
+const AHEAD=3;  // sentences queued ahead of the one being read
 ```
 
-Rough memory use: about 5 MB per page of audio, so the default 3-page buffer is only ~15 MB. For a bigger safety cushion raise `MARGIN` (e.g. 1.5) or `AHEAD_PAGES`.
+Online voices still need a network connection, and a very slow connection can still cause a short pause. A local (offline) voice never will.
 
 ## Controls
 
@@ -67,37 +53,34 @@ Rough memory use: about 5 MB per page of audio, so the default 3-page buffer is 
 | Next / previous sentence | `→` / `←` | Player buttons |
 | Next / previous chapter | `Shift+→` / `Shift+←` | Player buttons |
 | Jump to a sentence | Click it | Tap it |
-| Read from selection | Select text → **Read from here** | Same |
+| Read from selection | Select text, then **Read from here** | Same |
 
 ## Project structure
 
 ```
 index.html   page markup and script includes
-styles.css   themes, layout, player, buffering screen
-app.js       file parsing, chapters, reader, speech, Kokoro engine
+styles.css   themes, layout and player
+app.js       file parsing, chapters, reader and speech
 ```
-
-How the voice engine works: `kokoroCore` runs in a Blob **web worker** (so the page doesn't freeze) and turns text into WAV blobs. The main thread keeps a promise cache keyed by `voice|sentence`, a priority queue (the sentence you need now jumps the line), and two alternating `Audio` elements for gapless playback. If workers are unavailable there is a **compatibility mode** on the main thread, which has no lookahead and may freeze the UI.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| "Opened as a file" error | Serve over `http://localhost` or GitHub Pages (see *Run it*) |
-| Voice download fails | Check your connection; the model comes from jsDelivr and Hugging Face. Tap **Retry** |
-| Preview inside Claude says network blocked | Use your hosted copy; sandboxed previews block the CDN |
-| Still pauses | Raise `MARGIN` in `app.js` (e.g. 1.5), or lower the playback speed. Speeds above 1x consume audio faster than it is generated |
-| Page looks stale after an update | Hard refresh (`Ctrl+Shift+R`) to bypass the cache |
-| No sound on mobile | Tap play once; browsers require a user gesture before audio |
+| No natural voices listed | Your browser only exposes basic voices. Try Chrome or Edge, or install better voices in system settings |
+| Voice list is empty at first | Some browsers load voices late; wait a second or reload |
+| Reading stops after a while (Chrome) | Reload the page and press play again; some online voices time out |
+| Page looks stale after an update | Hard refresh (`Ctrl+Shift+R`) |
+| No sound on mobile | Tap play once; browsers require a tap before audio starts |
 
 ## Privacy
 
-Documents are parsed in your browser. The only network requests are loading the libraries and the Kokoro model, and fetching a web page when you paste a link. Library, progress, settings and wishlist are stored in your browser's `localStorage`.
+Documents are parsed in your browser. Library, progress, settings and wishlist are stored in your browser's `localStorage`. Online voices send the text being spoken to the voice provider (for example Google or Microsoft); pick an offline voice if you want nothing sent anywhere.
 
 ## Credits
 
-[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) and [kokoro-js](https://github.com/hexgrad/kokoro), [pdf.js](https://mozilla.github.io/pdf.js/), [JSZip](https://stuk.github.io/jszip/), Literata typeface.
+[pdf.js](https://mozilla.github.io/pdf.js/), [JSZip](https://stuk.github.io/jszip/), Literata typeface.
 
 ## License
 
-Add your preferred license here (e.g. MIT).
+NA
