@@ -179,8 +179,10 @@ const prevC=()=>si>2||ci===0?go(ci,0):go(ci-1,0);
 
 /* ---------- speech ---------- */
 function speak(){
-  const t=++token;synth.cancel();au.pause();
+  const t=++token;synth.cancel();pauseAU();
   if(!playing)return;
+  const wasNat=natural;natural=false;
+  if(!wasNat&&selK()&&kReady)kdrop();
   let txt=ch[ci].S[si].t;
   if(part&&part.c===ci&&part.s===si)txt=txt.slice(part.o)||txt;
   part=null;
@@ -205,7 +207,7 @@ function setPlaying(p){
   if('mediaSession'in navigator)navigator.mediaSession.playbackState=p?'playing':'paused';
 }
 function toggle(){if(!ch.length)return;setPlaying(!playing);speak()}
-function stop(){setPlaying(false);token++;synth.cancel();au.pause()}
+function stop(){setPlaying(false);token++;synth.cancel();pauseAU();hideWait()}
 function finish(){stop();setMsg('')}
 
 /* ---------- controls ---------- */
@@ -213,7 +215,7 @@ document.querySelectorAll('.pp').forEach(b=>b.onclick=toggle);
 document.querySelectorAll('.prc').forEach(b=>b.onclick=prevC);
 document.querySelectorAll('.nxc').forEach(b=>b.onclick=nextC);
 $('#ns').onclick=nextS;$('#ps').onclick=prevS;
-$('#rate').oninput=e=>{rate=+e.target.value;store.set('rate',rate);au.playbackRate=rate;if(ch.length)mark()};
+$('#rate').oninput=e=>{rate=+e.target.value;store.set('rate',rate);AU.forEach(a=>a.playbackRate=rate);if(ch.length)mark()};
 $('#rate').onchange=()=>{if(playing&&!(selK()&&kReady))speak()};
 function chList(open){
   const l=$('#chlist');l.hidden=!open;$('#chbar').setAttribute('aria-expanded',open);
@@ -237,7 +239,7 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='ArrowRight'){e.preventDefault();e.shiftKey?nextC():nextS()}
   else if(e.key==='ArrowLeft'){e.preventDefault();e.shiftKey?prevC():prevS()}
 });
-document.addEventListener('visibilitychange',()=>{if(playing&&!synth.speaking)speak()});
+document.addEventListener('visibilitychange',()=>{if(playing&&!synth.speaking&&AU.every(a=>a.paused)&&!$('#fab').classList.contains('busy')&&$('#wait').hidden)speak()});
 if('mediaSession'in navigator){
   const h=(a,f)=>{try{navigator.mediaSession.setActionHandler(a,f)}catch(e){}};
   h('play',()=>{if(!playing)toggle()});h('pause',()=>{if(playing)toggle()});
@@ -248,7 +250,13 @@ if('mediaSession'in navigator){
 /* ---------- voices: Kokoro AI (Heart) + this device ---------- */
 const KV=[['af_heart','Heart ❤ — Kokoro AI'],['af_bella','Bella — Kokoro AI'],['af_nicole','Nicole — Kokoro AI'],['af_sarah','Sarah — Kokoro AI'],['af_nova','Nova — Kokoro AI'],['af_sky','Sky — Kokoro AI'],['am_adam','Adam — Kokoro AI'],['am_michael','Michael — Kokoro AI'],['am_fenrir','Fenrir — Kokoro AI'],['bf_emma','Emma (UK) — Kokoro AI'],['bf_isabella','Isabella (UK) — Kokoro AI'],['bm_george','George (UK) — Kokoro AI'],['bm_lewis','Lewis (UK) — Kokoro AI']];
 let kMode='',dev=[],kv='af_heart',kw=null,kReady=false,kBusy=false,kPct=0,kErr='',kid=0,part=null;
-const kpend=new Map(),kcache=new Map(),au=new Audio();au.preservesPitch=true;
+/* Smooth-playback buffer. A "page" is ~1800 characters of text. */
+const PAGE_CH=1800, START_PAGES=1, AHEAD_PAGES=3, KMAX=600;
+const BUF_START=PAGE_CH*START_PAGES, BUF_AHEAD=PAGE_CH*AHEAD_PAGES;
+const kpend=new Map(),kcache=new Map(),kdone=new Set(),kst=new Set(),au=new Audio();au.preservesPitch=true;
+const AU=[au,new Audio()];AU[1].preservesPitch=true;let ai=0,natural=false,waitSkip=false;
+const pauseAU=()=>AU.forEach(a=>a.pause());
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const selK=()=>$('#voice').value.startsWith('k:');
 function kStatus(){
   let h;
@@ -282,14 +290,14 @@ function kokoroCore(KokoroTTS,post){
   async function run(){
     if(busy||!tts)return;busy=true;
     while(q.length){
-      const m=q.shift();
+      const m=q.shift();post({type:'start',id:m.id});
       try{const a=await tts.generate(m.text,{voice:m.voice});post({type:'audio',id:m.id,blob:wav(a.audio,a.sampling_rate)})}
       catch(e){post({type:'fail',id:m.id,msg:String(e)})}
       await new Promise(r=>setTimeout(r,40));
     }
     busy=false;
   }
-  return m=>{if(m.type==='load')load();else if(m.type==='gen'){m.pri?q.unshift(m):q.push(m);run()}};
+  return m=>{if(m.type==='load')load();else if(m.type==='gen'){m.pri?q.unshift(m):q.push(m);run()}else if(m.type==='bump'){const i=q.findIndex(x=>x.id===m.id);if(i>0)q.unshift(q.splice(i,1)[0])}else if(m.type==='drop'){const d=new Set(m.ids);q=q.filter(x=>!d.has(x.id))}};
 }
 function kFail(m){
   kBusy=false;kErr=m+(/claude/.test(location.hostname)?' (Claude’s preview blocks the network. Use your hosted copy.)':'');
@@ -300,8 +308,9 @@ function kMsg(e){
   if(m.type==='progress'){kPct=m.pct;kStatus()}
   else if(m.type==='ready'){kReady=true;kBusy=false;store.set('kdl',1);kStatus();toast('Heart voice ready ❤');if(playing&&selK())speak()}
   else if(m.type==='error')kFail(m.msg)
-  else if(m.type==='audio'&&r){kpend.delete(m.id);r(URL.createObjectURL(m.blob))}
-  else if(m.type==='fail'&&r){kpend.delete(m.id);r(null)}
+  else if(m.type==='start')kst.add(m.id);
+  else if(m.type==='audio'){kst.delete(m.id);if(r){kpend.delete(m.id);r(URL.createObjectURL(m.blob))}}
+  else if(m.type==='fail'){kst.delete(m.id);if(r){kpend.delete(m.id);r(null)}}
 }
 async function kMain(why){
   if(kw||kReady)return;kErr='';kBusy=true;kMode='main';kStatus();
@@ -323,25 +332,67 @@ function kLoad(){
   }catch(e){kFail('Couldn’t start a background worker: '+String((e&&e.message)||e))}
 }
 function kgen(text,pri){
-  const k=kv+'|'+text;
-  if(!kcache.has(k)){
+  const k=kv+'|'+text;let e=kcache.get(k);
+  if(!e){
     const id=++kid;
-    kcache.set(k,new Promise(res=>{kpend.set(id,res);kw.postMessage({type:'gen',id,text,voice:kv,pri})}));
-    if(kcache.size>14){const f=kcache.keys().next().value,p=kcache.get(f);kcache.delete(f);p.then(u=>u&&URL.revokeObjectURL(u))}
-  }
-  return kcache.get(k);
+    e={id,p:new Promise(res=>{kpend.set(id,res);kw.postMessage({type:'gen',id,text,voice:kv,pri})})};
+    kcache.set(k,e);
+    e.p.then(u=>{if(u)kdone.add(k);else if(kcache.get(k)===e)kcache.delete(k)});
+    while(kcache.size>KMAX){const f=kcache.keys().next().value,o=kcache.get(f);kcache.delete(f);kdone.delete(f);o.p.then(u=>u&&URL.revokeObjectURL(u))}
+  }else if(pri&&!kdone.has(k))kw.postMessage({type:'bump',id:e.id});
+  return e.p;
 }
-const ahead=n=>{const o=[];let c=ci,s=si;while(o.length<n){s++;if(s>=ch[c].S.length){c++;s=0}if(c>=ch.length)break;o.push(ch[c].S[s].t)}return o};
+/* forget queued-but-not-started sentences (after a jump / voice change) so the engine works on what matters now */
+function kdrop(){
+  const ids=[];
+  for(const [k,e] of kcache){
+    if(kpend.has(e.id)&&!kst.has(e.id)){ids.push(e.id);const r=kpend.get(e.id);kpend.delete(e.id);kcache.delete(k);r(null)}
+  }
+  if(ids.length&&kw)kw.postMessage({type:'drop',ids});
+}
+/* sentences after the current one, up to ~maxCh characters, crossing chapters */
+function lookahead(maxCh){
+  const o=[];let c=ci,s=si+1,n=0;
+  while(n<maxCh){
+    if(s>=ch[c].S.length){c++;s=0}
+    if(c>=ch.length)break;
+    const t=ch[c].S[s].t;o.push(t);n+=t.length;s++;
+  }
+  return o;
+}
+const prefetch=()=>lookahead(BUF_AHEAD).forEach(x=>kgen(x));
+function showWait(){$('#wait').hidden=false;$('#wdev').hidden=!dev.length}
+function setWait(f){const p=Math.round(Math.min(1,f)*100);$('#wait i').style.width=p+'%';$('#waitt').textContent=p+'% of the next page is ready'}
+function hideWait(){$('#wait').hidden=true}
+/* waiting screen: hold playback until ~1 page is generated (or the user says start now) */
+async function kWait(t,txt){
+  const L=[txt,...lookahead(BUF_START)],need=L.reduce((a,x)=>a+x.length,0);
+  const have=()=>{let n=0;for(const x of L){if(!kdone.has(kv+'|'+x))break;n+=x.length}return n};
+  if(have()>=need)return true;
+  waitSkip=false;showWait();const t0=Date.now();
+  while(t===token&&playing&&!waitSkip&&Date.now()-t0<45000){
+    const h=have();setWait(h/need);if(h>=need)break;
+    L.forEach(x=>kgen(x));await sleep(120);
+  }
+  hideWait();return t===token&&playing;
+}
 async function speakK(t,txt){
-  $('#fab').classList.add('busy');
-  const p=kgen(txt,true);ahead(kMode==='main'?0:2).forEach(x=>kgen(x));
-  const url=await p;$('#fab').classList.remove('busy');
+  const fab=$('#fab');fab.classList.add('busy');
+  const p=kgen(txt,true);
+  if(kMode!=='main'){prefetch();if(!(await kWait(t,txt))){fab.classList.remove('busy');return}}
+  const url=await p;fab.classList.remove('busy');
   if(t!==token||!playing)return;
   if(!url){speakDev(t,txt);return}
-  au.src=url;au.playbackRate=rate;au.volume=muted?0:1;
-  const nx=()=>{if(t===token&&playing)nextS()};
-  au.onended=nx;au.onerror=nx;
-  try{await au.play()}catch(e){}
+  /* gapless: the next sentence is already loaded in the other audio element */
+  let a=AU[1-ai];
+  if(a.dataset.u===url)ai=1-ai;else{a=AU[ai];a.src=url;a.dataset.u=url}
+  AU[1-ai].pause();
+  const nx=()=>{if(t===token&&playing){natural=true;nextS()}};
+  AU.forEach(x=>{x.onended=null;x.onerror=null});
+  a.onended=nx;a.onerror=nx;a.playbackRate=rate;a.volume=muted?0:1;
+  try{await a.play()}catch(e){}
+  const n=lookahead(1)[0];
+  if(n)kgen(n).then(u=>{if(u&&t===token){const o=AU[1-ai];if(o.dataset.u!==u){o.dataset.u=u;o.src=u;o.preload='auto';o.load()}}});
 }
 function pickVoice(v,save){
   if(![...$('#voice').options].some(x=>x.value===v))v='k:af_heart';
@@ -581,3 +632,8 @@ rfh.onclick=()=>{
 };
 $('#main').addEventListener('scroll',()=>{rfh.hidden=true},{passive:true});
 showTab(lib.length?'books':'add');
+
+/* buffering screen buttons */
+$('#wgo').onclick=()=>{waitSkip=true};
+$('#wdev').onclick=()=>{const d=dev.find(x=>x.default)||dev[0];if(d){waitSkip=true;pickVoice(d.voiceURI,true);hideWait();speak()}};
+$('#wcancel').onclick=()=>{stop()};

@@ -171,6 +171,16 @@ input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
 #rfh{position:fixed;z-index:40;padding:10px 16px;border:none;border-radius:999px;background:var(--grad);color:#fff;font-weight:600;box-shadow:var(--shadow);cursor:pointer;animation:rise .2s}
 #rfh:hover{filter:brightness(1.1)}
 
+/* ---------- buffering screen ---------- */
+#wait{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:20px;background:rgba(10,15,40,.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:fade .2s}
+.wcard{width:100%;max-width:22rem;padding:22px;border-radius:22px;background:var(--surface);border:1px solid var(--line);box-shadow:0 18px 50px rgba(10,15,40,.35);text-align:center}
+.wcard b{font-size:18px}
+.wcard .meter{height:9px;margin:14px 0 8px}
+.wcard small{color:var(--muted)}
+.wcard p{margin:10px 0 16px;color:var(--muted);font-size:13px}
+.wbtns{display:flex;flex-direction:column;gap:8px}
+.wbtns .btn{width:100%}
+.btn.alt{background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none}
 @keyframes pulse{from{transform:scale(.95);opacity:.7}to{transform:scale(1.4);opacity:0}}
 @keyframes breathe{50%{opacity:.55}}
 @keyframes rise{from{transform:translateY(22px) scale(.97);opacity:0}}
