@@ -57,15 +57,7 @@ Online voices still need a network connection, and a very slow connection can st
 | Jump to a sentence | Click it | Tap it |
 | Read from selection | Select text, then **Read from here** | Same |
 
-## Changing the creator name
 
-Edit one line at the top of `app.js`:
-
-```js
-const CREATOR='hexonzero';
-```
-
-It appears as "Idea & creation by …" at the bottom of the home screen and in the page's author tag.
 
 ## Project structure
 
