@@ -1,5 +1,7 @@
 # Read Aloud
 
+Created by **hexonzero**.
+
 A private web reader that **reads documents to you out loud**. Open a PDF, EPUB, DOCX, TXT, Markdown or HTML file, paste a web link, or paste text, and listen using the natural voices built into your browser. No account, no server, and your files never leave your device.
 
 ## Features
@@ -55,6 +57,16 @@ Online voices still need a network connection, and a very slow connection can st
 | Jump to a sentence | Click it | Tap it |
 | Read from selection | Select text, then **Read from here** | Same |
 
+## Changing the creator name
+
+Edit one line at the top of `app.js`:
+
+```js
+const CREATOR='hexonzero';
+```
+
+It appears as "Idea & creation by …" at the bottom of the home screen and in the page's author tag.
+
 ## Project structure
 
 ```
@@ -78,6 +90,8 @@ app.js       file parsing, chapters, reader and speech
 Documents are parsed in your browser. Library, progress, settings and wishlist are stored in your browser's `localStorage`. Online voices send the text being spoken to the voice provider (for example Google or Microsoft); pick an offline voice if you want nothing sent anywhere.
 
 ## Credits
+
+Idea and creation: hexonzero. Libraries:
 
 [pdf.js](https://mozilla.github.io/pdf.js/), [JSZip](https://stuk.github.io/jszip/), Literata typeface.
 

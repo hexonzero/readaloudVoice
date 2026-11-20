@@ -1,4 +1,6 @@
 
+/* Creator credit: change this one line to your name. Shown on the home screen and in the page's author tag. */
+const CREATOR='hexonzero';
 const $=s=>document.querySelector(s);
 const esc=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const synth=window.speechSynthesis;
@@ -501,3 +503,7 @@ rfh.onclick=()=>{
 };
 $('#main').addEventListener('scroll',()=>{rfh.hidden=true},{passive:true});
 showTab(lib.length?'books':'add');
+
+/* creator credit */
+{const m=document.createElement('meta');m.name='author';m.content=CREATOR;document.head.appendChild(m);
+$('#credit').innerHTML='Idea &amp; creation by <b>'+esc(CREATOR)+'</b>'}
