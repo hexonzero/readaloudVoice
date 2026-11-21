@@ -315,17 +315,37 @@ function watch(on){
     if(!synth.speaking&&!synth.pending){if(++stall>=2){stall=0;if(!posAfter(ci,si))finish();else speak()}}else stall=0;
   },2500);
 }
-/* keep the screen on while reading (user preference) */
+/* keep the screen on while reading (user preference).
+   Uses the Screen Wake Lock API; if the browser lacks it or refuses, falls back to a tiny silent looping video (the "NoSleep" trick). */
+const NOSLEEP={mp4:'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAM2bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAmB0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAEAAAABAAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAHYbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAAKABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABg21pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAUNzdGJsAAAAt3N0c2QAAAAAAAAAAQAAAKdhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAEAAQABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALWF2Y0MBQsAK/+EAFmdCwAraEJsBEAAAAwAQAAADAKDxImoBAARozjyAAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAFiAAABYgAAAAGHN0dHMAAAAAAAAAAQAAAAUAAAgAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAAAcc3RzYwAAAAAAAAABAAAAAQAAAAUAAAABAAAAKHN0c3oAAAAAAAAAAAAAAAUAAAKcAAAACgAAAAoAAAAKAAAACgAAABRzdGNvAAAAAAAAAAEAAANmAAAAYnVkdGEAAABabWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAtaWxzdAAAACWpdG9vAAAAHWRhdGEAAAABAAAAAExhdmY2MC4xNi4xMDAAAAAIZnJlZQAAAsxtZGF0AAACegYF//923EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NCByMzEwOCAzMWUxOWY5IC0gSC4yNjQvTVBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAyMyAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaHRtbCAtIG9wdGlvbnM6IGNhYmFjPTAgcmVmPTEgZGVibG9jaz0xOjA6MCBhbmFseXNlPTB4MToweDEgbWU9aGV4IHN1Ym1lPTIgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MCBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTAgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9MCB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIHN0aXRjaGFibGU9MSBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTUgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD0xMCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAaZYiEBT///w9FAAEqvycnJ1111111111114AAAAAGQZogFPCMAAAABkGaQBTwjAAAAAZBmmAT8IwAAAAGQZqAEvCM',webm:'data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAJKEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggEeTbuMU6uEHFO7a1OsggI07AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECPQAAAAAAAFlSua8GuAQAAAAAAADjXgQFzxYge9rpB6T7NJ5yBACK1nIN1bmSIgQCGhVZfVlA4g4EBI+ODhAvrwgDgibCBQLqBQJqBAhJUw2f8c3OgY8CAZ8iaRaOHRU5DT0RFUkSHjUxhdmY2MC4xNi4xMDBzc9ZjwItjxYge9rpB6T7NJ2fIoUWjh0VOQ09ERVJEh5RMYXZjNjAuMzEuMTAyIGxpYnZweGfIoUWjiERVUkFUSU9ORIeTMDA6MDA6MDEuMDAwMDAwMDAwAB9DtnVAj+eBAKOqgQAAgPACAJ0BKkAAQAAARwiFhYiFhIgCAgAGcDxCYAqyIPcwAP7/q1CAo5aBAMgA0QEAARAQABgAGFgv9AAIjoAAo5aBAZAA0QEAARAQABgAGFgv9AAIjoAAo5aBAlgA0QEAARAQABgAGFgv9AAIjoAAo5aBAyAA0QEAARAQABgAGFgv9AAIjoAAHFO7a5G7j7OBALeK94EB8YIBn/CBAw=='};
+let nv=null;
+function nsVideo(){
+  if(nv)return nv;
+  nv=document.createElement('video');nv.setAttribute('playsinline','');nv.setAttribute('muted','');nv.muted=true;nv.loop=true;
+  nv.style.cssText='position:fixed;left:0;top:0;width:2px;height:2px;opacity:.01;pointer-events:none';
+  nv.src=nv.canPlayType('video/mp4')?NOSLEEP.mp4:NOSLEEP.webm;document.body.appendChild(nv);return nv;
+}
 function wakeSync(){
   wlQ=wlQ.then(async()=>{
-    const want=wakeOn&&playing&&document.visibilityState==='visible'&&!!navigator.wakeLock;
-    if(want&&!wl){wl=await navigator.wakeLock.request('screen');wl.addEventListener('release',()=>{wl=null})}
-    else if(!want&&wl){const x=wl;wl=null;await x.release()}
-  }).catch(()=>{wl=null});
+    const want=wakeOn&&playing&&document.visibilityState==='visible';
+    if(want){
+      let ok=!!wl;
+      if(!ok&&navigator.wakeLock){
+        try{
+          const l=await navigator.wakeLock.request('screen');wl=l;ok=true;
+          l.addEventListener('release',()=>{if(wl===l)wl=null;if(wakeOn&&playing&&document.visibilityState==='visible')setTimeout(wakeSync,400)});
+        }catch(e){wl=null}
+      }
+      if(!ok){try{await nsVideo().play()}catch(e){}}
+      else if(nv)nv.pause();
+    }else{
+      if(wl){const x=wl;wl=null;try{await x.release()}catch(e){}}
+      if(nv)nv.pause();
+    }
+  }).catch(()=>{});
 }
 function wakeSet(v){
-  if(v&&!navigator.wakeLock){toast('This browser can’t keep the screen on');return}
-  wakeOn=v;store.set('wake',v);wakeSync();toast(v?'Screen stays on while reading':'Screen can sleep normally');
+  wakeOn=v;store.set('wake',v);wakeSync();toast(v?(playing?'Screen stays on while reading':'Screen will stay on while reading plays'):'Screen can sleep normally',2200);
 }
 function stop(){setPlaying(false);token++;synth.cancel()}
 function finish(){stop();toast('Finished reading',2200)}
@@ -502,6 +522,11 @@ fd.addEventListener('close',()=>{if(fdirty&&playing)speak();fdirty=false});
 fd.addEventListener('click',e=>{if(e.target===fd)fd.close()});
 $('#f-done').onclick=()=>fd.close();
 
+function fitMenu(){   /* the menu covers the player and is sized to the screen, so no option is ever pushed off the top */
+  const m=$('#menu');if(m.hidden)return;
+  m.style.maxHeight=Math.max(160,$('#sheet').getBoundingClientRect().bottom-16)+'px';
+}
+addEventListener('resize',fitMenu);
 function renderMenu(){
   const on=v=>v?'On':'Off';
   $('#menu').innerHTML='<button data-a="wake" role="switch" aria-checked="'+wakeOn+'">Keep screen on<i class="sw"></i></button>'
@@ -512,12 +537,15 @@ function renderMenu(){
    +'<button data-a="follow">Follow text<span>'+on(follow)+'</span></button>'
    +'<button data-a="theme">Theme<span>'+theme+'</span></button>'
    +'<div class="row">Text size<span><button data-a="fs-" aria-label="Smaller text">A−</button><button data-a="fs+" aria-label="Larger text">A+</button></span></div>'
-   +'<h4>Highlight</h4>'+[['s','Sentence'],['p','Paragraph'],['o','Off']].map(h=>'<button data-h="'+h[0]+'">'+h[1]+'<span>'+(hm===h[0]?'✓':'')+'</span></button>').join('');
+   +'<h4>Highlight</h4>'+[['s','Sentence'],['p','Paragraph'],['o','Off']].map(h=>'<button data-h="'+h[0]+'">'+h[1]+'<span>'+(hm===h[0]?'✓':'')+'</span></button>').join('')
+   +'<button data-a="close" class="done">Done</button>';
+  fitMenu();
 }
-$('#gear').onclick=()=>{const m=$('#menu');m.hidden=!m.hidden;if(!m.hidden)renderMenu()};
+$('#gear').onclick=()=>{const m=$('#menu');m.hidden=!m.hidden;if(!m.hidden){renderMenu();m.scrollTop=0}};
 $('#xp').onclick=()=>sheet(false);
 $('#menu').onclick=e=>{
   const b=e.target.closest('button');if(!b)return;const a=b.dataset.a,L=[0,15,30,60],T=['auto','light','dark','sepia'];
+  if(a==='close'){$('#menu').hidden=true;return}
   if(a==='wake')wakeSet(!wakeOn);
   else if(a==='sleep'){sleepMin=L[(L.indexOf(sleepMin)+1)%4];clearTimeout(sleepT);if(sleepMin)sleepT=setTimeout(()=>{stop();sleepMin=0},sleepMin*60000)}
   else if(a==='filters'){$('#menu').hidden=true;openFilters();return}
@@ -566,7 +594,7 @@ $('#menuBtn').onclick=()=>chList($('#chlist').hidden);
 /* swipe gestures */
 function swipe(el,fn){
   let x0=null,y0=0,t0=0;
-  el.addEventListener('touchstart',e=>{if(e.touches.length!==1||e.target.closest('input,select')){x0=null;return}x0=e.touches[0].clientX;y0=e.touches[0].clientY;t0=Date.now()},{passive:true});
+  el.addEventListener('touchstart',e=>{if(e.touches.length!==1||e.target.closest('input,select,#menu')){x0=null;return}x0=e.touches[0].clientX;y0=e.touches[0].clientY;t0=Date.now()},{passive:true});
   el.addEventListener('touchend',e=>{
     if(x0===null)return;const t=e.changedTouches[0],dx=t.clientX-x0,dy=t.clientY-y0;x0=null;
     if(Date.now()-t0>650)return;const ax=Math.abs(dx),ay=Math.abs(dy);

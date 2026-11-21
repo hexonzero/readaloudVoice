@@ -153,7 +153,7 @@ input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
 .pills select#rate{flex:none;width:5.6rem}
 
 /* ---------- menu, toast, read-from-here ---------- */
-#menu{position:absolute;left:0;right:0;bottom:calc(100% + 8px);max-height:60vh;overflow-y:auto;padding:6px;border-radius:16px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);z-index:6}
+#menu{position:absolute;left:0;right:0;bottom:0;max-height:60vh;overflow-y:auto;overscroll-behavior:contain;padding:6px;border-radius:22px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);z-index:6}
 #menu button{display:flex;justify-content:space-between;width:100%;padding:12px;border:none;border-radius:10px;background:none;cursor:pointer;text-align:left;transition:background .15s}
 #menu button:hover{background:var(--hl)}
 #menu span{color:var(--muted);text-transform:capitalize}
@@ -204,3 +204,5 @@ input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
 .pager button{padding:10px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer;font-weight:600;transition:border-color .15s,transform .15s}
 .pager button:hover:not(:disabled){border-color:var(--accent);transform:translateY(-1px)}
 .pager button:disabled{opacity:.4;cursor:default}
+
+#menu .done{justify-content:center;margin-top:6px;font-weight:700;color:var(--accent);border:1px solid var(--line)}
