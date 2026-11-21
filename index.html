@@ -4,10 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Read Aloud</title>
+<meta name="description" content="Open a document, web page or pasted text and have it read aloud with your browser's natural voices.">
+<meta name="theme-color" content="#5558E3">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&display=swap">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<noscript><p style="padding:16px">Read Aloud needs JavaScript to run.</p></noscript>
 <div class="top"><header><button class="circ" id="homeBtn" hidden aria-label="Home"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><h1 id="title">Read Aloud</h1><button id="chbar" hidden aria-expanded="false" aria-label="Chapters"><span id="chn"></span><span id="chname"></span></button><button class="circ" id="menuBtn" hidden aria-label="Chapter list"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg></button></header><div id="chlist" hidden></div></div>
 <main id="main">
   <section id="home">
@@ -24,6 +30,13 @@
       <h3 class="sec">Or paste text</h3>
       <textarea id="ptxt" rows="3" placeholder="Paste or type anything…" aria-label="Text to read"></textarea>
       <button id="ptgo" class="btn">Read text</button>
+      <h3 class="sec">Listen to a page</h3>
+      <button id="clip" class="btn">Read what I copied</button> <button id="inst" class="btn2" hidden>Install app</button>
+      <p class="tip">Copy a page’s link or text, then tap the button. On Chrome for Android, install this app (⋮ → <b>Install app</b>) and then use <b>Share → Read Aloud</b> on any page.</p>
+      <details class="more"><summary>Bookmarklet (reads the page you are viewing)</summary>
+        <p class="tip">Save this as a bookmark: <a id="bm" href="#">Read this page aloud</a>. Then, on any page, open the bookmark. It sends the page’s visible text here, so it also works on pages that block link fetching. On a phone, tap <b>Copy bookmarklet</b>, add any bookmark and paste into its address.</p>
+        <button id="bmcopy" class="btn2">Copy bookmarklet</button>
+      </details>
     </div>
     <div class="panel" id="p-books" hidden></div>
     <div class="panel" id="p-wish" hidden>
@@ -58,12 +71,23 @@
   <div id="menu" hidden></div>
 </section>
 <button id="rfh" hidden>▶ Read from here</button>
+<dialog id="flt" aria-label="Reading filters">
+  <h3>Skip when reading aloud</h3>
+  <p class="tip">Only changes what you hear. The text on screen stays the same.</p>
+  <label class="fr"><span>Special characters<small>Symbols such as * # _ ~ | / [ ] { } = + @</small></span><input type="checkbox" class="swc" id="f-special"></label>
+  <label class="fr"><span>Emoji<small>Pictures and emoticon symbols</small></span><input type="checkbox" class="swc" id="f-emoji"></label>
+  <label class="fr"><span>Reference numbers<small>Citations like [12] or [3, 4]</small></span><input type="checkbox" class="swc" id="f-cite"></label>
+  <label class="fr"><span>Web links<small>https://… and www.…</small></span><input type="checkbox" class="swc" id="f-url"></label>
+  <label for="f-custom" class="fl">Custom words or characters (one per line)</label>
+  <textarea id="f-custom" rows="4" placeholder="Advertisement&#10;©&#10;***"></textarea>
+  <p class="tip">Words match whole words, ignoring capitals. Anything else is removed wherever it appears.</p>
+  <button id="f-done" class="btn">Done</button>
+</dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="file" accept=".pdf,.epub,.docx,.txt,.md,.html,.htm" hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

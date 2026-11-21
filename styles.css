@@ -21,7 +21,7 @@
 }
 
 *{box-sizing:border-box}
-html,body{height:100%;margin:0}
+html,body{height:100%;height:100dvh;margin:0}
 body{background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;-webkit-tap-highlight-color:transparent}
 [hidden]{display:none!important}
 button,select,input,textarea{font:inherit;color:inherit}
@@ -46,7 +46,7 @@ header h1{flex:1;margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em;b
 #chlist button.cur{background:var(--hl);font-weight:600;box-shadow:inset 3px 0 var(--accent)}
 
 /* ---------- home ---------- */
-main{flex:1;overflow-y:auto;position:relative}
+main{flex:1;overflow-y:auto;position:relative;overflow-anchor:none}
 #home{max-width:40rem;margin:0 auto;padding-bottom:40px}
 .ribbons{display:flex;position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line)}
 .ribbons button{position:relative;flex:1;padding:15px 6px;background:none;border:none;cursor:pointer;font-weight:600;color:var(--muted);transition:color .2s}
@@ -172,3 +172,35 @@ input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
 @keyframes rise{from{transform:translateY(22px) scale(.97);opacity:0}}
 @keyframes fade{from{opacity:0;transform:translateY(6px)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- keep-screen-on switch, listen-to-page card ---------- */
+#menu .sw{position:relative;flex:none;width:42px;height:24px;border-radius:12px;background:var(--line);transition:background .2s}
+#menu .sw::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .2s}
+#menu button[aria-checked=true] .sw{background:var(--accent)}
+#menu button[aria-checked=true] .sw::after{transform:translateX(18px)}
+.btn2{padding:10px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font-weight:600;cursor:pointer;transition:border-color .15s,transform .15s}
+.btn2:hover{border-color:var(--accent);transform:translateY(-1px)}
+.tip{margin:10px 0 0;color:var(--muted);font-size:13px}
+.tip a{color:var(--accent);font-weight:600}
+.more{margin-top:12px}
+.more summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0}
+
+/* ---------- reading filters dialog ---------- */
+#flt{width:min(26rem,calc(100vw - 24px));max-height:88vh;overflow-y:auto;padding:18px;border:1px solid var(--line);border-radius:20px;background:var(--surface);color:var(--ink);box-shadow:0 18px 50px rgba(10,15,40,.35)}
+#flt::backdrop{background:rgba(10,15,30,.5)}
+#flt h3{margin:0 0 4px;font-size:18px}
+#flt .fr{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
+#flt .fr small{display:block;color:var(--muted);font-size:12px}
+#flt .fl{display:block;margin:14px 0 6px;font-weight:600}
+#flt .btn{margin-top:6px;width:100%}
+.swc{appearance:none;-webkit-appearance:none;flex:none;position:relative;width:42px;height:24px;margin:0;border-radius:12px;background:var(--line);cursor:pointer;transition:background .2s}
+.swc::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .2s}
+.swc:checked{background:var(--accent)}
+.swc:checked::after{transform:translateX(18px)}
+
+/* ---------- reading views ---------- */
+.chap+.chap{margin-top:30px;padding-top:14px;border-top:1px solid var(--line)}
+.pager{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:26px 0 0;font:600 14px system-ui,sans-serif;color:var(--muted)}
+.pager button{padding:10px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer;font-weight:600;transition:border-color .15s,transform .15s}
+.pager button:hover:not(:disabled){border-color:var(--accent);transform:translateY(-1px)}
+.pager button:disabled{opacity:.4;cursor:default}

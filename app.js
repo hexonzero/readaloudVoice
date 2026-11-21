@@ -2,19 +2,26 @@
 /* Creator credit: change this one line to your name. Shown on the home screen and in the page's author tag. */
 const CREATOR='hexonzero';
 const $=s=>document.querySelector(s);
-const esc=t=>t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const esc=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const synth=window.speechSynthesis;
 let ch=[],ci=0,si=0,playing=false,token=0,rate=1,voice=null,total=0,bookId='',docTitle='',pdfN=0,docPages=1;
 const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
-if(pdfjsLib){try{pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js'}catch(e){}}
+if(typeof pdfjsLib!=='undefined'){try{pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js'}catch(e){}}
 
+let wakeOn=!!store.get('wake'),wl=null,wlQ=Promise.resolve(),wd=null,stall=0;
+let mode=store.get('mode')==='page'?'page':'scroll',lo=0,hi=0,rpg=null,jump=false,progUntil=0,st=null;
 let lib=store.get('books')||[],wish=store.get('wish')||[];
 /* ---------- text -> chapters ---------- */
 const seg=window.Intl&&Intl.Segmenter?new Intl.Segmenter(undefined,{granularity:'sentence'}):null;
 function split(t){
   if(t.length<=260)return[t];
+  const bits=[];
+  t.replace(/([,;:—])\s+/g,'$1\u0001').split('\u0001').forEach(p=>{
+    if(p.length<=240)bits.push(p);
+    else{let c='';for(const w of p.split(/\s+/)){if(c&&(c+' '+w).length>240){bits.push(c);c=w}else c=c?c+' '+w:w}if(c)bits.push(c)}
+  });
   const o=[];let c='';
-  for(const p of t.split(/(?<=[,;:—])\s+/)){if(c&&(c+' '+p).length>240){o.push(c);c=p}else c=c?c+' '+p:p}
+  for(const p of bits){if(c&&(c+' '+p).length>240){o.push(c);c=p}else c=c?c+' '+p:p}
   if(c)o.push(c);return o;
 }
 function sentences(par){
@@ -41,6 +48,7 @@ const parseHTML=s=>new DOMParser().parseFromString(s,'text/html');
 
 /* ---------- parsers: each returns [{title,text}] ---------- */
 async function readPdf(buf){
+  if(typeof pdfjsLib==='undefined')throw new Error('The PDF reader failed to load. Check your connection and reload the page.');
   const pdf=await pdfjsLib.getDocument({data:buf}).promise;
   const pages=[];
   for(let i=1;i<=pdf.numPages;i++){
@@ -70,6 +78,7 @@ async function readPdf(buf){
   return out;
 }
 async function readEpub(buf){
+  if(typeof JSZip==='undefined')throw new Error('The file reader failed to load. Check your connection and reload the page.');
   const z=await JSZip.loadAsync(buf);
   const txt=async p=>(await z.file(p).async('string'));
   const cont=new DOMParser().parseFromString(await txt('META-INF/container.xml'),'application/xml');
@@ -81,7 +90,7 @@ async function readEpub(buf){
   const out=[];let n=0;
   for(const r of opf.querySelectorAll('spine > itemref')){
     const href=man[r.getAttribute('idref')];if(!href)continue;
-    const f=z.file(base+decodeURI(href))||z.file(decodeURI(href));if(!f)continue;
+    let dh=href;try{dh=decodeURI(href)}catch(e){}const f=z.file(base+dh)||z.file(dh);if(!f)continue;
     const d=parseHTML(await f.async('string'));
     const h=d.querySelector('h1,h2,h3');const title=h&&h.textContent.trim();
     const text=htmlText(d);
@@ -91,6 +100,7 @@ async function readEpub(buf){
   return out;
 }
 async function readDocx(buf){
+  if(typeof JSZip==='undefined')throw new Error('The file reader failed to load. Check your connection and reload the page.');
   const z=await JSZip.loadAsync(buf);
   const x=new DOMParser().parseFromString(await z.file('word/document.xml').async('string'),'application/xml');
   const out=[];let cur={title:'Beginning',text:''};
@@ -136,23 +146,93 @@ async function load(file){
     ci=ch[b.ci]?b.ci:0;si=ch[ci].S[b.si]?b.si:0;
     $('#title').textContent=docTitle;
     $('#chlist').innerHTML=ch.map((c,i)=>'<button data-c="'+i+'">'+(i+1)+'. '+esc(c.title.slice(0,80))+'</button>').join('');
-    $('#home').hidden=true;$('#homeBtn').hidden=false;$('#chbar').hidden=false;$('#menuBtn').hidden=false;$('#title').hidden=true;$('#pane').hidden=false;$('#fab').hidden=false;setMsg('');hintOnce();
-    renderChapter();mark();
-  }catch(e){console.error(e);showTab('add');setMsg(e.message||'Couldn’t open that file.',true)}
+    $('#home').hidden=true;$('#homeBtn').hidden=false;$('#chbar').hidden=false;$('#menuBtn').hidden=false;$('#title').hidden=true;$('#pane').hidden=false;$('#fab').hidden=false;sheet(false);window.fabClamp&&window.fabClamp();setMsg('');hintOnce();
+    jump=true;render();mark();jump=false;
+    return true;
+  }catch(e){console.error(e);showTab('add');setMsg(e.message||'Couldn’t open that file.',true);return false}
 }
 
 /* ---------- reading pane ---------- */
-function renderChapter(){
-  const c=ch[ci];let h='<h2>'+esc(c.title)+'</h2><p>';
-  c.S.forEach((s,i)=>{if(s.p&&i)h+='</p><p>';h+='<span class="s" data-i="'+i+'">'+esc(s.t)+' </span>'});
-  $('#pane').innerHTML=h+'</p>';$('#main').scrollTop=0;
+/* Two reading views: "scroll" = endless scroll (chapters load as you go, both directions),
+   "page" = one page at a time (real PDF pages, otherwise ~1800 characters, matching the "Page x of y" numbers). */
+function spansHTML(c,k,a,b){
+  let h='';
+  for(let i=a;i<=b;i++){const t=c.S[i];if(t.p&&i>a)h+='</p><p>';h+='<span class="s" data-c="'+k+'" data-i="'+i+'">'+esc(t.t)+' </span>'}
+  return h;
 }
-function mark(){
+const chHTML=k=>'<section class="chap" data-c="'+k+'"><h2>'+esc(ch[k].title)+'</h2><p>'+spansHTML(ch[k],k,0,ch[k].S.length-1)+'</p></section>';
+function pagesOf(c){
+  if(c.pgs)return c.pgs;
+  const key=i=>c.S[i].pg!==undefined?c.S[i].pg:Math.floor((c.off+c.S[i].o)/1800),out=[];let a=0;
+  for(let i=1;i<=c.S.length;i++){if(i===c.S.length||key(i)!==key(i-1)){out.push([a,i-1]);a=i}}
+  return c.pgs=out;
+}
+const pageIdx=(c,i)=>{const p=pagesOf(c);for(let k=0;k<p.length;k++)if(i<=p[k][1])return k;return p.length-1};
+function pageHTML(){
+  const c=ch[ci],pg=pagesOf(c),pi=pageIdx(c,si),r=pg[pi],t0=c.S[r[0]];
+  rpg={c:ci,a:r[0],b:r[1]};
+  const no=t0.pg||Math.floor((c.off+t0.o)/1800)+1;
+  return '<section class="chap" data-c="'+ci+'">'+(pi===0?'<h2>'+esc(c.title)+'</h2>':'')+'<p>'+spansHTML(c,ci,r[0],r[1])+'</p></section>'
+   +'<nav class="pager"><button type="button" data-pg="-1"'+(pi===0&&ci===0?' disabled':'')+'>‹ Previous</button><span>Page '+(pdfN?'':'~')+no+' of '+docPages+'</span><button type="button" data-pg="1"'+(pi===pg.length-1&&ci===ch.length-1?' disabled':'')+'>Next ›</button></nav>';
+}
+function render(){
+  const pane=$('#pane'),m=$('#main');
+  if(mode==='page'){pane.innerHTML=pageHTML();m.scrollTop=0;return}
+  rpg=null;lo=hi=ci;pane.innerHTML=chHTML(ci);m.scrollTop=0;fill();
+}
+function appendCh(){if(hi>=ch.length-1)return;hi++;$('#pane').insertAdjacentHTML('beforeend',chHTML(hi));trim()}
+function prependCh(){
+  if(lo<=0)return;lo--;
+  const m=$('#main'),b=m.scrollHeight;$('#pane').insertAdjacentHTML('afterbegin',chHTML(lo));m.scrollTop+=m.scrollHeight-b;   /* keep the view where it was */
+}
+function trim(){   /* drop chapters far above the reader so very long books stay light */
+  const m=$('#main');
+  while(hi-lo>6&&lo<ci-1){const e=$('#pane .chap[data-c="'+lo+'"]');if(e){const b=m.scrollHeight;e.remove();m.scrollTop-=b-m.scrollHeight}lo++}
+}
+function fill(){
+  if(mode!=='scroll'||$('#pane').hidden||!ch.length)return;
+  const m=$('#main');let n=0;
+  while(hi<ch.length-1&&m.scrollHeight-m.scrollTop-m.clientHeight<1500&&n++<3)appendCh();
+  if(lo>0&&m.scrollTop<500)prependCh();
+}
+function showCh(c){   /* make sure chapter c is on screen-able in the DOM */
+  if(mode==='page'){render();return}
+  if(c>=lo&&c<=hi)return;
+  if(c===hi+1)appendCh();else if(c===lo-1)prependCh();else render();
+}
+function syncScroll(){   /* when not playing, the reading position follows what you scroll to */
+  if(mode!=='scroll'||playing||!ch.length||$('#pane').hidden||Date.now()<progUntil)return;
+  const x=innerWidth/2,y0=innerHeight*0.35;let el=null;
+  for(const dy of [0,20,-20,40,-40,70,-70,100]){const e=document.elementFromPoint(x,y0+dy);el=e&&e.closest?e.closest('.s'):null;if(el)break}
+  if(!el)return;
+  const c=+el.dataset.c,i=+el.dataset.i;
+  if(c!==ci||i!==si){ci=c;si=i;mark(true)}
+}
+function setMode(m){
+  mode=m;store.set('mode',m);
+  if(ch.length){jump=true;render();mark();jump=false}
+  toast(m==='page'?'Page by page':'Infinite scroll');
+}
+function vis(el){const r=el.getBoundingClientRect();return r.top>=70&&r.bottom<=innerHeight*0.8}
+function pageNav(d){
+  const c=ch[ci],pg=pagesOf(c),pi=pageIdx(c,si);
+  if(d>0){if(pi+1<pg.length)go(ci,pg[pi+1][0]);else if(ci+1<ch.length)go(ci+1,0);else toast('End of book')}
+  else{if(pi>0)go(ci,pg[pi-1][0]);else if(ci>0){const p=pagesOf(ch[ci-1]);go(ci-1,p[p.length-1][0])}else toast('Start of book')}
+}
+function mark(noscroll){
   const c=ch[ci],s=c.S[si];
+  if(mode==='page'&&(!rpg||rpg.c!==ci||si<rpg.a||si>rpg.b))render();
   const prev=$('.s.on');if(prev)prev.classList.remove('on');
   const pp=$('#pane p.on');if(pp)pp.classList.remove('on');
-  const el=$('.s[data-i="'+si+'"]');
-  if(el){el.classList.add('on');el.parentNode.classList.add('on');if(follow)el.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'})}
+  const el=$('.s[data-c="'+ci+'"][data-i="'+si+'"]');
+  if(el){
+    el.classList.add('on');el.parentNode.classList.add('on');
+    if((follow||jump)&&!noscroll&&(playing||jump||!vis(el))){
+      progUntil=Date.now()+1000;
+      const sec=si===0&&mode==='scroll'?el.closest('.chap'):null;
+      (sec||el).scrollIntoView({block:sec?'start':'center',behavior:jump||matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'});
+    }
+  }
   $('#now').textContent=s.t;
   $('#chap').textContent=docTitle+' · Page '+(pdfN?'':'~')+pageNow()+' of '+docPages;
   $('#ctt').textContent='Chapter '+(ci+1)+' · '+c.title;$('#cv').textContent=(docTitle||'R').charAt(0).toUpperCase();
@@ -171,7 +251,7 @@ function mark(){
 function go(c,s){
   c=Math.max(0,Math.min(ch.length-1,c));
   const changed=c!==ci;ci=c;si=Math.max(0,Math.min(ch[ci].S.length-1,s));
-  if(changed){renderChapter();toast('Chapter '+(ci+1)+' · '+ch[ci].title)}
+  if(changed){showCh(ci);toast('Chapter '+(ci+1)+' · '+ch[ci].title)}
   mark();if(playing)speak();
 }
 const nextS=()=>si+1<ch[ci].S.length?go(ci,si+1):ci+1<ch.length?go(ci+1,0):finish();
@@ -197,16 +277,17 @@ function topUp(t){
   if(t!==token||!nq)return;
   const p=nq;nq=posAfter(p.c,p.s);queueU(t,p.c,p.s,ch[p.c].S[p.s].t);
 }
+function advance(t,c,s){
+  if(t!==token||!playing)return;
+  if(c!==ci||s!==si){const changed=c!==ci;ci=c;si=s;if(changed){showCh(ci);toast('Chapter '+(ci+1)+' · '+ch[ci].title)}mark();topUp(t)}
+}
 function queueU(t,c,s,txt){
-  const u=new SpeechSynthesisUtterance(txt),last=!posAfter(c,s);
+  const u=new SpeechSynthesisUtterance(spoken(txt)),last=!posAfter(c,s);
   if(voice){u.voice=voice;u.lang=voice.lang}
   u.rate=rate;u.volume=muted?0:1;
-  u.onstart=()=>{
-    if(t!==token||!playing)return;
-    if(c!==ci||s!==si){const changed=c!==ci;ci=c;si=s;if(changed){renderChapter();toast('Chapter '+(ci+1)+' · '+ch[ci].title)}mark()}
-    topUp(t);
-  };
-  u.onend=()=>{if(t===token&&playing&&last)finish()};
+  /* some voices never fire onstart, so onend also moves the highlight on (advance ignores repeats) */
+  u.onstart=()=>advance(t,c,s);
+  u.onend=()=>{if(t!==token||!playing)return;if(last)finish();else{const n=posAfter(c,s);advance(t,n.c,n.s)}};
   u.onerror=e=>{if(t===token&&playing&&last&&e.error!=='canceled'&&e.error!=='interrupted')finish()};
   synth.speak(u);
 }
@@ -218,14 +299,39 @@ function setPlaying(p){
   playing=p;$('#fab').classList.toggle('playing',p);
   document.querySelectorAll('.pp').forEach(b=>{b.innerHTML='<svg viewBox="0 0 24 24">'+(p?'<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>':'<path d="M8 5l11 7-11 7z"/>')+'</svg>';b.setAttribute('aria-label',p?'Pause':'Play')});
   try{if(p)keep.play().catch(()=>{});else keep.pause()}catch(e){}
+  wakeSync();watch(p);
   if('mediaSession'in navigator)navigator.mediaSession.playbackState=p?'playing':'paused';
 }
-function toggle(){if(!ch.length)return;setPlaying(!playing);speak()}
+function toggle(){
+  if(!ch.length)return;
+  if(!synth){toast('This browser can’t read aloud');return}
+  setPlaying(!playing);speak();
+}
+/* watchdog: if the speech engine silently dies (a known Chrome quirk) restart it instead of staying "playing" in silence */
+function watch(on){
+  clearInterval(wd);stall=0;
+  if(on)wd=setInterval(()=>{
+    if(!playing||document.hidden){stall=0;return}
+    if(!synth.speaking&&!synth.pending){if(++stall>=2){stall=0;if(!posAfter(ci,si))finish();else speak()}}else stall=0;
+  },2500);
+}
+/* keep the screen on while reading (user preference) */
+function wakeSync(){
+  wlQ=wlQ.then(async()=>{
+    const want=wakeOn&&playing&&document.visibilityState==='visible'&&!!navigator.wakeLock;
+    if(want&&!wl){wl=await navigator.wakeLock.request('screen');wl.addEventListener('release',()=>{wl=null})}
+    else if(!want&&wl){const x=wl;wl=null;await x.release()}
+  }).catch(()=>{wl=null});
+}
+function wakeSet(v){
+  if(v&&!navigator.wakeLock){toast('This browser can’t keep the screen on');return}
+  wakeOn=v;store.set('wake',v);wakeSync();toast(v?'Screen stays on while reading':'Screen can sleep normally');
+}
 function stop(){setPlaying(false);token++;synth.cancel()}
-function finish(){stop();setMsg('')}
+function finish(){stop();toast('Finished reading',2200)}
 
 /* ---------- controls ---------- */
-document.querySelectorAll('.pp').forEach(b=>b.onclick=toggle);
+document.querySelectorAll('#sheet .pp').forEach(b=>b.onclick=toggle);
 document.querySelectorAll('.prc').forEach(b=>b.onclick=prevC);
 document.querySelectorAll('.nxc').forEach(b=>b.onclick=nextC);
 $('#ns').onclick=nextS;$('#ps').onclick=prevS;
@@ -243,17 +349,18 @@ const seek=$('#seek');
 seek.oninput=()=>{const c=ch[ci],o=seek.value/1000*c.len,k=15*rate;$('#t1').textContent=fmt(o/k);$('#t2').textContent='≈ −'+fmt((c.len-o)/k)};
 seek.onchange=()=>{const rel=seek.value/1000*ch[ci].len;let s=0;ch[ci].S.forEach((x,i)=>{if(x.o<=rel)s=i});go(ci,s)};
 $('#pane').onclick=e=>{
+  const pb=e.target.closest('[data-pg]');if(pb){pageNav(+pb.dataset.pg);return}
   const s=e.target.closest('.s'),n=Date.now();
   if(coarse&&n-lastTap<320){lastTap=0;toggle();toast(playing?'Playing':'Paused');buzz();return}
-  lastTap=n;if(s)go(ci,+s.dataset.i);
+  lastTap=n;if(s)go(+s.dataset.c,+s.dataset.i);
 };
 document.addEventListener('keydown',e=>{
-  if(!ch.length||!$('#home').hidden||/INPUT|SELECT|BUTTON/.test(e.target.tagName))return;
+  if(!ch.length||!$('#home').hidden||/INPUT|SELECT|BUTTON|TEXTAREA/.test(e.target.tagName))return;
   if(e.code==='Space'){e.preventDefault();toggle()}
   else if(e.key==='ArrowRight'){e.preventDefault();e.shiftKey?nextC():nextS()}
   else if(e.key==='ArrowLeft'){e.preventDefault();e.shiftKey?prevC():prevS()}
 });
-document.addEventListener('visibilitychange',()=>{if(playing&&!synth.speaking)speak()});
+document.addEventListener('visibilitychange',()=>{wakeSync();if(playing&&!synth.speaking&&!synth.pending)speak()});
 if('mediaSession'in navigator){
   const h=(a,f)=>{try{navigator.mediaSession.setActionHandler(a,f)}catch(e){}};
   h('play',()=>{if(!playing)toggle()});h('pause',()=>{if(playing)toggle()});
@@ -290,13 +397,15 @@ const fi=$('#file');
 $('#drop').onclick=()=>fi.click();
 $('#drop').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fi.click()}};
 fi.onchange=()=>{if(fi.files[0])load(fi.files[0]);fi.value=''};
-['dragover','dragenter'].forEach(t=>document.addEventListener(t,e=>{e.preventDefault();$('#drop').classList.add('over')}));
-['dragleave','drop'].forEach(t=>document.addEventListener(t,e=>{e.preventDefault();$('#drop').classList.remove('over')}));
-document.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)load(f)});
+const hasF=e=>e.dataTransfer&&[...(e.dataTransfer.types||[])].includes('Files');
+['dragover','dragenter'].forEach(t=>document.addEventListener(t,e=>{if(!hasF(e))return;e.preventDefault();$('#drop').classList.add('over')}));
+['dragleave','drop'].forEach(t=>document.addEventListener(t,e=>{if(t==='drop'&&!hasF(e))return;e.preventDefault();$('#drop').classList.remove('over')}));
+document.addEventListener('drop',e=>{const f=e.dataTransfer&&e.dataTransfer.files[0];if(f)load(f)});
 
 /* ---------- home: books + wishlist ---------- */
 function pageNow(){const s=ch[ci].S[si];return s.pg||Math.floor((ch[ci].off+s.o)/1800)+1}
-const idb=()=>new Promise((res,rej)=>{const r=indexedDB.open('readaloud',1);r.onupgradeneeded=()=>r.result.createObjectStore('files');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+let _db=null;
+const idb=()=>_db||(_db=new Promise((res,rej)=>{const r=indexedDB.open('readaloud',1);r.onupgradeneeded=()=>r.result.createObjectStore('files');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}).catch(e=>{_db=null;throw e}));
 async function fx(mode,fn){const d=await idb();return new Promise((res,rej)=>{const t=d.transaction('files',mode);const q=fn(t.objectStore('files'));t.oncomplete=()=>res(q&&q.result);t.onerror=()=>rej(t.error)})}
 const fput=(k,v)=>fx('readwrite',s=>s.put(v,k));
 const fget=k=>fx('readonly',s=>s.get(k));
@@ -346,7 +455,7 @@ $('#wl').onclick=e=>{
 };
 ['add','books','wish'].forEach(t=>$('#tab-'+t).onclick=()=>{setMsg('');showTab(t)});
 $('#homeBtn').onclick=()=>{
-  stop();chList(false);$('#menu').hidden=true;$('#menuBtn').hidden=true;$('#title').hidden=false;$('#chbar').hidden=true;$('#pane').hidden=true;$('#fab').hidden=true;$('#sheet').hidden=true;$('#homeBtn').hidden=true;
+  stop();chList(false);$('#menu').hidden=true;$('#menuBtn').hidden=true;$('#title').hidden=false;$('#chbar').hidden=true;$('#pane').hidden=true;$('#fab').hidden=true;sheet(false);$('#homeBtn').hidden=true;
   $('#home').hidden=false;$('#title').textContent='Read Aloud';showTab('books');
 };
 /* ---------- player: sheet, floating button, gestures ---------- */
@@ -361,10 +470,45 @@ function applyFs(){document.documentElement.style.setProperty('--fs',fs+'px')}
 applyTheme();applyFs();$('#pane').className='hm-'+hm;
 function sheet(open){$('#sheet').hidden=!open;$('#fab').classList.toggle('away',open);$('#menu').hidden=true}
 
+/* ---------- reading filters: characters / words that are left out of the speech (the screen text is unchanged) ---------- */
+let flt=Object.assign({special:false,emoji:false,cite:false,url:false,custom:''},store.get('filters')||{}),fre=[],fdirty=false;
+const SPECIAL=/[^\p{L}\p{N}\p{M}\s.,;:!?'"’‘“”()\-–—…%$€£¥&]/gu,EMOJI=/[\p{Extended_Pictographic}\uFE0F\u200D\u20E3]/gu,FKEYS=['special','emoji','cite','url'];
+const filtersOn=()=>FKEYS.some(k=>flt[k])||fre.length>0;
+function compileFilters(){
+  fre=[];
+  String(flt.custom||'').split('\n').map(x=>x.trim()).filter(Boolean).slice(0,200).forEach(w=>{
+    const e=w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),word=/^[\p{L}\p{N}_'’-]+$/u.test(w);
+    try{fre.push({w:word,re:word?new RegExp('(^|[^\\p{L}\\p{N}])'+e+'(?![\\p{L}\\p{N}])','giu'):new RegExp(e,'g')})}catch(x){}
+  });
+}
+function spoken(t){
+  if(!filtersOn())return t;
+  if(flt.url)t=t.replace(/https?:\/\/\S+|www\.\S+/gi,' ');
+  if(flt.cite)t=t.replace(/\[\s*\d+(?:\s*[,–-]\s*\d+)*\s*\]/g,' ');
+  fre.forEach(f=>{t=t.replace(f.re,f.w?'$1 ':' ')});
+  if(flt.emoji)t=t.replace(EMOJI,' ');
+  if(flt.special)t=t.replace(SPECIAL,' ');
+  t=t.replace(/\s+/g,' ').trim();
+  return /[\p{L}\p{N}]/u.test(t)?t:' ';
+}
+compileFilters();
+const fd=$('#flt');
+function openFilters(){
+  if(!fd.showModal){toast('This browser can’t show the filter window');return}
+  FKEYS.forEach(k=>$('#f-'+k).checked=!!flt[k]);$('#f-custom').value=flt.custom||'';fdirty=false;fd.showModal();
+}
+fd.addEventListener('input',()=>{FKEYS.forEach(k=>flt[k]=$('#f-'+k).checked);flt.custom=$('#f-custom').value;store.set('filters',flt);compileFilters();fdirty=true});
+fd.addEventListener('close',()=>{if(fdirty&&playing)speak();fdirty=false});
+fd.addEventListener('click',e=>{if(e.target===fd)fd.close()});
+$('#f-done').onclick=()=>fd.close();
+
 function renderMenu(){
   const on=v=>v?'On':'Off';
-  $('#menu').innerHTML='<button data-a="sleep">Sleep timer<span>'+(sleepMin?sleepMin+' min':'Off')+'</span></button>'
+  $('#menu').innerHTML='<button data-a="wake" role="switch" aria-checked="'+wakeOn+'">Keep screen on<i class="sw"></i></button>'
+   +'<button data-a="sleep">Sleep timer<span>'+(sleepMin?sleepMin+' min':'Off')+'</span></button>'
+   +'<button data-a="filters">Reading filters<span>'+(filtersOn()?'On':'Off')+'</span></button>'
    +'<button data-a="mute">Mute<span>'+on(muted)+'</span></button>'
+   +'<button data-a="view">Reading view<span>'+(mode==='page'?'Page by page':'Infinite scroll')+'</span></button>'
    +'<button data-a="follow">Follow text<span>'+on(follow)+'</span></button>'
    +'<button data-a="theme">Theme<span>'+theme+'</span></button>'
    +'<div class="row">Text size<span><button data-a="fs-" aria-label="Smaller text">A−</button><button data-a="fs+" aria-label="Larger text">A+</button></span></div>'
@@ -374,8 +518,11 @@ $('#gear').onclick=()=>{const m=$('#menu');m.hidden=!m.hidden;if(!m.hidden)rende
 $('#xp').onclick=()=>sheet(false);
 $('#menu').onclick=e=>{
   const b=e.target.closest('button');if(!b)return;const a=b.dataset.a,L=[0,15,30,60],T=['auto','light','dark','sepia'];
-  if(a==='sleep'){sleepMin=L[(L.indexOf(sleepMin)+1)%4];clearTimeout(sleepT);if(sleepMin)sleepT=setTimeout(()=>{stop();sleepMin=0},sleepMin*60000)}
+  if(a==='wake')wakeSet(!wakeOn);
+  else if(a==='sleep'){sleepMin=L[(L.indexOf(sleepMin)+1)%4];clearTimeout(sleepT);if(sleepMin)sleepT=setTimeout(()=>{stop();sleepMin=0},sleepMin*60000)}
+  else if(a==='filters'){$('#menu').hidden=true;openFilters();return}
   else if(a==='mute'){muted=!muted;if(playing)speak()}
+  else if(a==='view')setMode(mode==='page'?'scroll':'page');
   else if(a==='follow')follow=!follow;
   else if(a==='theme'){theme=T[(T.indexOf(theme)+1)%4];store.set('theme',theme);applyTheme()}
   else if(a==='fs+'||a==='fs-'){fs=Math.max(14,Math.min(32,fs+(a==='fs+'?1:-1)));store.set('fs',fs);applyFs();if(ch.length)mark()}
@@ -389,13 +536,17 @@ $('#menuBtn').onclick=()=>chList($('#chlist').hidden);
 /* floating button: tap = play/pause, badge or long-press = open player, drag = move */
 (function(){
   const f=$('#fab');let sx=null,sy=0,ox=0,oy=0,drag=false,lp=null;
-  const place=(x,y)=>{x=Math.max(8,Math.min(innerWidth-68,x));y=Math.max(64,Math.min(innerHeight-68,y));f.style.left=x+'px';f.style.top=y+'px';f.style.right=f.style.bottom='auto'};
+  const place=(x,y)=>{x=Math.max(8,Math.min(innerWidth-70,x));y=Math.max(64,Math.min(innerHeight-70,y));f.style.left=x+'px';f.style.top=y+'px';f.style.right=f.style.bottom='auto'};
   const sp=store.get('fab');if(sp)place(sp.x*innerWidth,sp.y*innerHeight);
+  /* keep it on screen after rotation, keyboard or address-bar resize */
+  const clamp=()=>{if(f.hidden||!f.style.left)return;const r=f.getBoundingClientRect();place(r.left,r.top)};
+  window.fabClamp=clamp;addEventListener('resize',clamp);addEventListener('orientationchange',clamp);
+  f.addEventListener('contextmenu',e=>e.preventDefault());
   f.addEventListener('pointerdown',e=>{
     skipClick=false;if(e.target.closest('#fabx'))return;
     sx=e.clientX;sy=e.clientY;const r=f.getBoundingClientRect();ox=r.left;oy=r.top;drag=false;
     try{f.setPointerCapture(e.pointerId)}catch(_){}
-    lp=setTimeout(()=>{if(!drag){skipClick=true;buzz();sheet(true)}},520);
+    clearTimeout(lp);lp=setTimeout(()=>{if(!drag){skipClick=true;buzz();sheet(true)}},520);
   });
   f.addEventListener('pointermove',e=>{
     if(sx===null)return;const dx=e.clientX-sx,dy=e.clientY-sy;
@@ -404,6 +555,7 @@ $('#menuBtn').onclick=()=>chList($('#chlist').hidden);
   });
   const end=()=>{clearTimeout(lp);if(sx===null)return;sx=null;if(drag){skipClick=true;const r=f.getBoundingClientRect();store.set('fab',{x:r.left/innerWidth,y:r.top/innerHeight})}};
   f.addEventListener('pointerup',end);f.addEventListener('pointercancel',end);
+  /* the only place the floating play button toggles playback */
   f.addEventListener('click',e=>{
     if(e.target.closest('#fabx')){sheet(true);return}
     if(skipClick){skipClick=false;return}
@@ -421,17 +573,22 @@ function swipe(el,fn){
     if(ax>60&&ax>ay*1.6)fn(dx<0?'left':'right');else if(ay>70&&ay>ax*1.6)fn(dy<0?'up':'down');
   },{passive:true});
 }
-swipe($('#pane'),d=>{if(d==='left'){nextS();toast('Next sentence');buzz()}else if(d==='right'){prevS();toast('Previous sentence');buzz()}});
+swipe($('#pane'),d=>{
+  if(mode==='page'){if(d==='left'){pageNav(1);buzz()}else if(d==='right'){pageNav(-1);buzz()}}
+  else if(d==='left'){nextS();toast('Next sentence');buzz()}else if(d==='right'){prevS();toast('Previous sentence');buzz()}
+});
 swipe($('#sheet'),d=>{if(d==='down')sheet(false);else if(d==='left'){nextC();buzz()}else if(d==='right'){prevC();buzz()}});
 /* ---------- web pages, pasted text, read-from-selection ---------- */
 const coarse=matchMedia('(pointer:coarse)').matches;
 const PROXIES=[u=>u,u=>'https://corsproxy.io/?url='+encodeURIComponent(u),u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),u=>'https://r.jina.ai/'+u];
 async function fetchPage(url){
   for(let i=0;i<PROXIES.length;i++){
-    try{const r=await fetch(PROXIES[i](url));if(!r.ok)throw 0;const t=await r.text();if(t.length<200)throw 0;return{text:t,md:i===3}}
+    const ac=new AbortController(),to=setTimeout(()=>ac.abort(),9000);
+    try{const r=await fetch(PROXIES[i](url),{signal:ac.signal});if(!r.ok)throw 0;const t=await r.text();if(t.length<200)throw 0;return{text:t,md:i===3}}
     catch(e){if(i<PROXIES.length-1)setMsg('Trying another route… ('+(i+2)+'/'+PROXIES.length+')')}
+    finally{clearTimeout(to)}
   }
-  throw new Error('Couldn’t fetch that page. Some sites block outside readers, and this preview blocks network access. Open the page, copy its text and use “Paste text”.');
+  throw new Error('Couldn’t fetch that page. Some sites block outside readers. Open the page, copy its text and use “Paste text” (or “Read what I copied”).');
 }
 function extract(src,url){
   const d=parseHTML(src),meta=d.querySelector('meta[property="og:title"]');
@@ -468,41 +625,92 @@ function htmlChapters(src,title){
   if(cur.text.trim())out.push(cur);
   return out.length?out:[{title,text:htmlText(d)}];
 }
-async function readUrl(){
-  let u=$('#url').value.trim();if(!u)return;if(!/^https?:\/\//i.test(u))u='https://'+u;
+async function readUrl(u){
+  u=(typeof u==='string'?u:$('#url').value).trim();if(!u)return false;if(!/^https?:\/\//i.test(u))u='https://'+u;
   try{
     setMsg('Fetching page…');
     const r=await fetchPage(u),p=r.md?mdToHtml(r.text):extract(r.text,u);
     if(p.html.length<300)throw new Error('Couldn’t find readable text on that page.');
-    await load(new File([p.html],(p.title.replace(/[\\/:*?"<>|]+/g,' ').trim().slice(0,60)||'Web page')+'.html',{type:'text/html'}));
-  }catch(e){showTab('add');setMsg(e.message,true)}
+    const ok=await load(new File([p.html],(p.title.replace(/[\\/:*?"<>|]+/g,' ').trim().slice(0,60)||'Web page')+'.html',{type:'text/html'}));
+    if(ok)$('#url').value='';
+    return ok;
+  }catch(e){showTab('add');setMsg(e.message,true);return false}
 }
-$('#urlgo').onclick=readUrl;$('#url').onkeydown=e=>{if(e.key==='Enter')readUrl()};
-$('#ptgo').onclick=()=>{
-  const t=$('#ptxt').value.trim();if(!t)return;
-  load(new File([t],(t.split('\n')[0].slice(0,50).trim()||'Pasted text')+' (pasted).txt',{type:'text/plain'}));
+$('#urlgo').onclick=()=>readUrl();$('#url').onkeydown=e=>{if(e.key==='Enter')readUrl()};
+/* pasted text: a lone link is fetched as a page, anything else is read as text */
+async function readText(t,title){
+  t=(t||'').trim();if(!t)return false;
+  if(/^https?:\/\/\S+$/i.test(t))return readUrl(t);
+  return load(new File([t],((title||t.split('\n')[0]).slice(0,50).replace(/[\\/:*?"<>|]+/g,' ').trim()||'Pasted text')+' (pasted).txt',{type:'text/plain'}));
+}
+$('#ptgo').onclick=async()=>{
+  const box=$('#ptxt');
+  if(await readText(box.value))box.value='';   /* don't leave the pasted text sitting in the box */
 };
 const rfh=$('#rfh');let selT=null;
 document.addEventListener('selectionchange',()=>{
   clearTimeout(selT);selT=setTimeout(()=>{
     const sel=getSelection();
     if(!sel||sel.isCollapsed||$('#pane').hidden||!sel.anchorNode){rfh.hidden=true;return}
-    const n=sel.anchorNode.nodeType===1?sel.anchorNode:sel.anchorNode.parentElement,s=n&&n.closest('.s');
+    const rg=sel.getRangeAt(0),sc=rg.startContainer;   /* start of the range, so backwards selections work too */
+    const n=sc.nodeType===1?sc:sc.parentElement,s=n&&n.closest&&n.closest('.s');
     if(!s){rfh.hidden=true;return}
-    rfh.dataset.i=s.dataset.i;rfh.dataset.o=s.textContent.lastIndexOf(' ',sel.anchorNode.nodeType===3?sel.anchorOffset:0)+1;
-    const r=sel.getRangeAt(0).getBoundingClientRect();
+    rfh.dataset.i=s.dataset.i;rfh.dataset.c=s.dataset.c;rfh.dataset.o=s.textContent.lastIndexOf(' ',sc.nodeType===3?rg.startOffset:0)+1;
+    const r=rg.getBoundingClientRect();
     rfh.hidden=false;rfh.style.top=Math.max(70,Math.min(innerHeight-110,r.bottom+16))+'px';rfh.style.left=Math.max(8,Math.min(innerWidth-176,r.left+r.width/2-84))+'px';
   },200);
 });
 rfh.addEventListener('pointerdown',e=>e.preventDefault());
 rfh.onclick=()=>{
-  const i=+rfh.dataset.i;part={c:ci,s:i,o:+rfh.dataset.o};
+  const i=+rfh.dataset.i,c=+rfh.dataset.c;part={c,s:i,o:+rfh.dataset.o};
   getSelection().removeAllRanges();rfh.hidden=true;
   if(!playing)setPlaying(true);
-  si=i;mark();speak();
+  ci=c;si=i;mark();speak();
 };
-$('#main').addEventListener('scroll',()=>{rfh.hidden=true},{passive:true});
+$('#main').addEventListener('scroll',()=>{rfh.hidden=true;fill();clearTimeout(st);st=setTimeout(syncScroll,180)},{passive:true});
 showTab(lib.length?'books':'add');
+
+/* ---------- "listen to this page" (like Chrome for Android) ----------
+   1. Install the app (⋮ → Install app) and use Share → Read Aloud on any page (manifest share_target)
+   2. "Read what I copied" button   3. Bookmarklet that sends the page you are looking at   4. ?url= / ?text= links */
+$('#clip').onclick=async()=>{
+  try{
+    const t=await navigator.clipboard.readText();
+    if(!t||!t.trim()){setMsg('Your clipboard is empty. Copy a page link or some text first.',true);return}
+    if(!(await readText(t)))return;
+  }catch(e){setMsg('Couldn’t read the clipboard. Paste into the box above instead.',true)}
+};
+function bookmarklet(){
+  const o=JSON.stringify(location.origin),a=JSON.stringify(location.origin+location.pathname);
+  return 'javascript:(function(){var A='+a+',O='+o+',s=String(getSelection()).trim(),m=document.querySelector("article,main,[role=main]"),t=s||(m&&m.innerText.length>600?m.innerText:document.body.innerText),w=window.open(A),n=0,d={readaloud:1,title:document.title,url:location.href,text:t},i=setInterval(function(){if(++n>40)clearInterval(i);try{w.postMessage(d,O)}catch(e){}},400);window.addEventListener("message",function(e){if(e.data==="readaloud-ok")clearInterval(i)})})()';
+}
+const bm=$('#bm');if(bm)bm.href=bookmarklet();
+$('#bmcopy').onclick=async()=>{try{await navigator.clipboard.writeText(bookmarklet());toast('Bookmarklet copied',2000)}catch(e){toast('Couldn’t copy. Long-press the link instead.',2500)}};
+let lastMsg='';
+addEventListener('message',e=>{
+  const d=e.data;if(!d||d.readaloud!==1||typeof d.text!=='string')return;
+  try{e.source.postMessage('readaloud-ok',e.origin)}catch(_){}
+  const text=d.text.trim(),key=(d.title||'')+'|'+text.length;
+  if(key===lastMsg)return;lastMsg=key;
+  if(text.length<20){showTab('add');setMsg('That page had no readable text.',true);return}
+  readText(text,d.title||'Web page');
+});
+function handleLaunch(){
+  const q=new URLSearchParams(location.search),title=q.get('title')||'',text=q.get('text')||'',url=q.get('url')||'';
+  if(!title&&!text&&!url)return;
+  try{history.replaceState(null,'',location.pathname)}catch(e){}
+  const link=((url.match(/https?:\/\/\S+/i)||text.match(/https?:\/\/\S+/i)||[])[0])||'';
+  const rest=text.replace(link,'').trim();
+  if(link&&rest.length<400){$('#url').value=link;readUrl(link)}
+  else if(text.trim().length>=20)readText(text,title);
+}
+handleLaunch();
+let dip=null;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();dip=e;$('#inst').hidden=false});
+addEventListener('appinstalled',()=>{$('#inst').hidden=true;dip=null});
+$('#inst').onclick=async()=>{if(!dip)return;dip.prompt();try{await dip.userChoice}catch(_){}dip=null;$('#inst').hidden=true};
+if('serviceWorker'in navigator&&(location.protocol==='https:'||location.hostname==='localhost')){navigator.serviceWorker.register('sw.js').catch(()=>{})}
+
 
 /* creator credit */
 {const m=document.createElement('meta');m.name='author';m.content=CREATOR;document.head.appendChild(m);
